@@ -1,8 +1,9 @@
 import * as React from 'react';
-import {isArray, isString}  from 'lodash';
+import {isObject, isArray, isString}  from 'lodash';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 
+import * as apigateway from '../util/apigateway';
 import {Logger} from '../util/logging'
 
 // Material UI
@@ -27,7 +28,7 @@ import Typography from '@material-ui/core/Typography';
 
 import DraftsIcon from '@material-ui/icons/Drafts';
 
-const log = Logger.Make('warn', 'Search');
+const log = Logger.Make('debug', 'Search');
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
@@ -46,15 +47,48 @@ interface IdentityProvider {
 	eTag_signin : string
 }
 
+export interface Auth0Identity {
+	user_id     : string,
+	provider    : string,
+	connection  : string,
+	profileData : any
+}
+
+interface SearchResult {
+	s4 : {
+		user_id : string,
+		bucket  : string,
+		region  : string
+	},
+	auth0: {
+		updated_at : string,
+		user_metadata : {
+			preferedAuth0ID ?: string
+		},
+		identities: Auth0Identity[]
+	}
+}
+
+interface SearchResults {
+	provider : string,
+	query    : string,
+	mode     : string,
+	limit    : number,
+	offset   : number,
+	results  : SearchResult[]
+}
+
 interface ISearchProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
 }
 
 interface ISearchState {
-	isFetchingIdentityProviders : boolean
+	isFetchingIdentityProviders : boolean,
 	identityProviders           : IdentityProvider[]
 	idpSelectedIndex            : number,
 	idpButtonAnchor             : HTMLElement|null,
-	idpMenuOpen                 : boolean
+	idpMenuOpen                 : boolean,
+	searchTextFieldStr          : string,
+	searchResults               : SearchResults|null
 }
 
 class Search extends React.Component<ISearchProps, ISearchState> {
@@ -64,7 +98,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		identityProviders           : [],
 		idpSelectedIndex            : -1,
 		idpButtonAnchor             : null,
-		idpMenuOpen                 : false
+		idpMenuOpen                 : false,
+		searchTextFieldStr          : '',
+		searchResults               : null
 	};
 
 	private urlForIdentityProvider = (idp: IdentityProvider)=> {
@@ -73,23 +109,30 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 	}
 
 	private fetchIdentityProviders = ()=> {
+		log.debug("fetchIdentityProviders()");
 
-		const url = 'https://s3-us-west-2.amazonaws.com/com.4th-a.resources/socialmediaproviders.json';
-		fetch(url).then((response)=>{
+		this.setState({
+			isFetchingIdentityProviders: true
+		});
+
+		const url = 'https://pzg66sum7l.execute-api.us-west-2.amazonaws.com/dev/config';
+		fetch(url).then((response)=> {
 
 			 return response.json();
 
 		}).then((json: any)=>{
+
+			log.debug("json: "+ JSON.stringify(json, null, 2));
 
 			const updatedState: Partial<ISearchState> = {
 				isFetchingIdentityProviders: false
 			};
 
 			let idp: IdentityProvider[]|null = null;
-			if (isArray(json))
+			if (isObject(json) && isArray(json.identityProviders))
 			{
 				let isValid = true;
-				for (const obj of json)
+				for (const obj of json.identityProviders)
 				{
 					if (!isString(obj.id) || !isString(obj.displayName)) {
 						isValid = false;
@@ -98,18 +141,25 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 				if (isValid)
 				{
-					idp = json as IdentityProvider[];
+					idp = json.identityProviders as IdentityProvider[];
 					idp.sort((a, b)=>{
 						return a.displayName.localeCompare(b.displayName);
 					});
 
 					updatedState.identityProviders = idp;
 				}
+				else
+				{
+					log.err("!isValid: json !!!")
+				}
 			}
 
-			this.setState(updatedState as any);
+			this.setState((current)=> { return {
+				...current,
+				...updatedState
+			}});
 
-		}).catch((err)=>{
+		}).catch((err)=> {
 
 			log.err('Error fetching socialmediaproviders.json: ' + err);
 
@@ -147,6 +197,88 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		});
 	}
 
+	protected searchTextFieldChanged = (
+		event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+	) => {
+		const newValue = event.target.value;
+		log.debug("searchTextFieldChanged() => "+ newValue);
+
+		this.setState({
+			searchTextFieldStr: newValue
+		});
+	}
+
+	protected searchTextFieldKeyPress = (
+		event: React.KeyboardEvent<HTMLDivElement>
+	) => {
+		if (event.key === 'Enter')
+		{
+			this.submitSearch();
+		}
+	}
+
+	protected submitSearch = ()=> {
+		log.debug("submitSearch(): "+ this.state.searchTextFieldStr);
+
+		const state = this.state;
+
+		let search_provider: string = "*"
+		if (state.idpSelectedIndex >= 0) {
+			search_provider = state.identityProviders[state.idpSelectedIndex].id;
+		}
+
+		const search_query = state.searchTextFieldStr.trim();
+
+		const emptySearchResults: SearchResults = {
+			provider : search_provider,
+			query    : search_query,
+			mode     : "boolean",
+			limit    : 100,
+			offset   : 0,
+			results  : []
+		};
+
+		if (search_query.length == 0)
+		{
+			this.setState({
+				searchResults: emptySearchResults
+			});
+			return;
+		}
+
+		const host = apigateway.getHost();
+		const path = apigateway.getPath("/auth0/search");
+
+		const body = {
+			provider : search_provider,
+			query    : search_query
+		};
+
+		const url = `https://${host}${path}`;
+
+		fetch(url, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify(body, null, 0)
+
+		}).then((response)=> {
+
+			return response.json();
+		
+		}).then((json)=> {
+
+			log.debug("search results: "+ JSON.stringify(json, null, 2));
+
+		}).catch(()=> {
+
+			this.setState({
+				searchResults: emptySearchResults
+			});
+		});
+	}
+
 	public render() {
 		const state = this.state;
 		const {classes} = this.props;
@@ -170,16 +302,18 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				<Typography variant="subheading">
 					<ul>
 						<li>Send files to any Storm4 user</li>
-						<li>Files are encrypted in your browser being uploading</li>
+						<li>Files are encrypted in your browser uploading</li>
 						<li>Storm4 users have their public keys secured on the blockchain</li>
 					</ul>
 				</Typography>
 				<TextField
-					id="search"
+					id="searchTextField"
 					label="Search for user"
 					type="search"
 					className={classes.searchTextField}
 					margin="normal"
+					onChange={this.searchTextFieldChanged}
+					onKeyPress={this.searchTextFieldKeyPress}
 				/>
 				<Button variant="outlined" onClick={this.identityProvidersButtonClicked}>
 					{providerName}
@@ -191,7 +325,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 					onClose={this.identityProvidersMenuClosed}
 					PaperProps={{
 						style: {
-						  maxHeight: 415
+							minHeight: 40,
+							maxHeight: 415
 						}
 					}}
 				>
@@ -210,11 +345,10 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 								selected={state.idpSelectedIndex == index}
 								onClick={onClick}
 							>
-								{idp.displayName}
 								<ListItemIcon className={classes.icon}>
-							 		<DraftsIcon />
+							 		<img src={this.urlForIdentityProvider(idp)} width="32" height="32" />
 								</ListItemIcon>
-								<ListItemText classes={{ primary: classes.primary }} inset primary="Drafts" />
+								<ListItemText classes={{ primary: classes.primary }} inset={true} primary={idp.displayName} />
 							</MenuItem>
 						);
 					})}
