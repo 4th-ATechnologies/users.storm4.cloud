@@ -1,0 +1,34 @@
+How to easily sync your changes to the S3 bucket.
+Requires aws-cli tools to be installed properly
+
+# BUILDING THE PROJECT
+
+  $ cd /to/this/directory
+  $ yarn build
+
+# SYNCING FILES TO S3 BUCKET
+
+  ### To sync folders:
+  
+  # users.storm4.cloud:
+  $ aws s3 sync ./build s3://users.storm4.cloud --exclude ".*" --exclude "*.DS_Store" --dryrun
+
+  # usersbeta.storm4.cloud:
+  $ aws s3 sync ./build s3://usersbeta.storm4.cloud --exclude ".*" --exclude "*.DS_Store" --dryrun
+  
+  Make sure the output looks good.
+  Then remove the "--dryrun" option.
+
+# UPDATING CLOUDFRONT (CDN)
+
+  If you want to rush the updates through CloudFront, you can create an "invalidation":
+  
+  Note: Invalidations technically aren't free.
+  But AWS gives us so many free invalidations per month,
+  that for our operation, it's essenstially free.
+
+  # users.storm4.cloud:
+  $ aws cloudfront create-invalidation --distribution-id E299Q95ZRIBGHF --paths '/*'
+  
+  # usersbeta.storm4.cloud:
+  $ aws cloudfront create-invalidation --distribution-id E299Q95ZRIBGHF --paths '/*'
