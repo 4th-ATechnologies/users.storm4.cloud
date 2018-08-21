@@ -173,20 +173,39 @@ interface SearchMatchInfo {
 	points      : number
 }
 
+interface UserIdentsMenuButtonClickedOptions {
+	userID      : string,
+	sourceIdx   : number,
+	selectedIdx : number
+}
+
 interface ISearchProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
 }
 
 interface ISearchState {
+
+	// Fetching list of identity providers (from 4th-A server).
+	// 
 	isFetchingIdentityProviders : boolean,
 	identityProviders           : IdentityProvider[]
-	idpSelectedIndex            : number,
-	idpButtonAnchor             : HTMLElement|null,
+
+	// Identity providers menu.
+	// Defaults to "All Providers" (idpMenuSelectedIndex < 0)
+	// 
+	idpMenuButtonAnchor         : HTMLElement|null,
 	idpMenuOpen                 : boolean,
+	idpMenuSelectedIndex        : number,
+
 	searchTextFieldStr          : string,
 	searchQueryIndex            : number, // if (searchQueryIndex > searchResultsIndex)
 	searchResultsIndex          : number, // then query is in progress
 	searchResults               : SearchResults|null
-	searchResultsPerPage        : number
+	searchResultsPerPage        : number,
+
+	userIdentsMenuAnchor        : HTMLElement|null,
+	userIdentsMenuOpen          : string|null,
+	userIdentsMenuSourceIndex   : number, // state.searchResults.results[here]
+	userIdentsMenuSelectedIndex : number,
 }
 
 class Search extends React.Component<ISearchProps, ISearchState> {
@@ -194,14 +213,21 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 	public state: ISearchState = {
 		isFetchingIdentityProviders : false,
 		identityProviders           : [],
-		idpSelectedIndex            : -1,
-		idpButtonAnchor             : null,
+		
+		idpMenuButtonAnchor         : null,
 		idpMenuOpen                 : false,
+		idpMenuSelectedIndex        : -1,
+
 		searchTextFieldStr          : '',
 		searchQueryIndex            : 0,
 		searchResultsIndex          : 0,
 		searchResults               : null,
-		searchResultsPerPage        : 25
+		searchResultsPerPage        : 25,
+
+		userIdentsMenuAnchor        : null,
+		userIdentsMenuOpen          : null,
+		userIdentsMenuSourceIndex   : 0, // state.searchResults.results[here]
+		userIdentsMenuSelectedIndex : 0,
 	};
 
 	private urlForIdentityProvider_64 = (idp: IdentityProvider|Auth0Identity)=> {
@@ -231,7 +257,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 	}
 
 	private fetchIdentityProviders = ()=> {
-		log.debug("fetchIdentityProviders()");
 
 		this.setState({
 			isFetchingIdentityProviders: true
@@ -243,8 +268,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			 return response.json();
 
 		}).then((json: any)=>{
-
-			log.debug("json: "+ JSON.stringify(json, null, 2));
 
 			const updatedState: Partial<ISearchState> = {
 				isFetchingIdentityProviders: false
@@ -291,31 +314,80 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		});
 	}
 
-	protected identityProvidersButtonClicked = (event: React.MouseEvent<HTMLElement>)=> {
-		log.debug('identityProvidersButtonClicked()');
+	protected idpMenuButtonClicked = (event: React.MouseEvent<HTMLElement>)=> {
+		log.debug('idpMenuButtonClicked()');
 
 		this.setState({
-			idpButtonAnchor : event.currentTarget,
-			idpMenuOpen     : true
+			idpMenuButtonAnchor : event.currentTarget,
+			idpMenuOpen         : true
 		});
 	}
 
-	protected identityProviderSelected = (index: number)=> {
-		log.debug(`identityProvidersMenuClosed(${index})`);
+	protected idpMenuItemSelected = (index: number)=> {
+		log.debug(`idpMenuItemSelected(${index})`);
 
 		this.setState({
-			idpSelectedIndex : index,
-			idpButtonAnchor  : null,
-			idpMenuOpen      : false
+			idpMenuButtonAnchor  : null,
+			idpMenuOpen          : false,
+			idpMenuSelectedIndex : index
 		});
 	}
 
-	protected identityProvidersMenuClosed = ()=> {
-		log.debug('identityProvidersMenuClosed()');
+	protected idpMenuClosed = ()=> {
+		log.debug('idpMenuClosed()');
 
 		this.setState({
-			idpButtonAnchor : null,
-			idpMenuOpen     : false
+			idpMenuButtonAnchor : null,
+			idpMenuOpen         : false
+		});
+	}
+
+	protected userIdentsMenuButtonClicked = (
+		event   : React.MouseEvent<HTMLElement>
+	): void => {
+		log.debug("userIdentsMenuButtonClicked()");
+
+		const str = event.currentTarget.dataset.mode!;
+
+		let options: UserIdentsMenuButtonClickedOptions|null = null;
+		try {
+			options = JSON.parse(str);
+		} catch(e) {
+			log.err("Error parsing dataset.mode: "+ e);
+		}
+		
+		if (options)
+		{
+			this.setState({
+				userIdentsMenuAnchor        : event.currentTarget,
+				userIdentsMenuOpen          : options.userID,
+				userIdentsMenuSourceIndex   : options.sourceIdx,
+				userIdentsMenuSelectedIndex : options.selectedIdx,
+			});
+		}
+	}
+
+	protected userIdentsMenuItemSelected = (index: number)=> {
+		log.debug(`userIdentsMenuItemSelected(${index})`);
+
+		// Todo...
+
+		this.setState({
+			userIdentsMenuAnchor        : null,
+			userIdentsMenuOpen          : null,
+			userIdentsMenuSourceIndex   : 0,
+			userIdentsMenuSelectedIndex : 0,
+		});
+	}
+
+	protected userIdentsMenuClosed = ()=> {
+		log.debug("userIdentsMenuClosed()");
+
+		this.setState({
+			userIdentsMenuAnchor        : null,
+			userIdentsMenuOpen          : null,
+			userIdentsMenuSourceIndex   : 0,
+			userIdentsMenuSelectedIndex : 0,
 		});
 	}
 
@@ -348,8 +420,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const searchQueryIndex = state.searchQueryIndex + 1;
 
 		let search_provider: string = "*"
-		if (state.idpSelectedIndex >= 0) {
-			search_provider = state.identityProviders[state.idpSelectedIndex].id;
+		if (state.idpMenuSelectedIndex >= 0) {
+			search_provider = state.identityProviders[state.idpMenuSelectedIndex].id;
 		}
 
 		const search_query = state.searchTextFieldStr.trim();
@@ -492,7 +564,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 			const matchInfo: SearchMatchInfo = {
 				identityIdx : idx,
-				displayName : this.displayNameForIdentity(searchResult, idx),
+				displayName : this.displayNameForIdentity(searchResult, identity),
 				boldRanges  : [],
 				points      : 0
 			};
@@ -514,7 +586,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				}
 			}
 
-			const imgUrl = this.imageUrlForIdentity(searchResult, idx);
+			const imgUrl = this.imageUrlForIdentity(searchResult, identity);
 			if (imgUrl != null) {
 				matchInfo.points++;
 			}
@@ -564,8 +636,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		});
 
 		const result = matchInfos[0];
-		log.debug("result: "+ JSON.stringify(result, null, 2));
-		log.debug("searchResult: "+ JSON.stringify(searchResult, null, 2));
 
 		// We have one last thing to do.
 		// The queryComponents may be: [
@@ -637,11 +707,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 	protected displayNameForIdentity = (
 		searchResult : SearchResult,
-		identityIdx  : number
+		identity     : Auth0Identity
 	): string =>
 	{
-		const identity = searchResult.auth0.identities[identityIdx];
-
 		let displayName: string|null = null;
 
 		switch (identity.provider)
@@ -673,24 +741,26 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 	}
 
 	protected imageUrlForIdentity = (
-		searchResult  : SearchResult,
-		identityIdx   : number
+		searchResult : SearchResult,
+		identity     : Auth0Identity
 	): string|null =>
 	{
-		const s4 = searchResult.s4;
-		const identity = searchResult.auth0.identities[identityIdx];
+		
 
 		let url: string|null = null;
 
 		if (identity.provider == "auth0")
 		{
+			const region = searchResult.s4.region;
+			const bucket = searchResult.s4.bucket;
+
 			const components = identity.user_id.split('|');
 			const auth0_id = components[components.length - 1];
 
 			// Example:
 			// https://s3-us-west-2.amazonaws.com/com.4th-a.user.jag15iacxneuco7owmegke63msbgyuyx-35e540bc/avatar/5a983d0232a70c286d7c1931
 
-			url = `https://s3-${s4.region}.amazonaws.com/${s4.bucket}/avatar/${auth0_id}`;
+			url = `https://s3-${region}.amazonaws.com/${bucket}/avatar/${auth0_id}`;
 		}
 		else
 		{
@@ -732,9 +802,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const {classes} = this.props;
 
 		let providerName: string;
-		if (state.idpSelectedIndex >= 0)
+		if (state.idpMenuSelectedIndex >= 0)
 		{
-			const idp = state.identityProviders[state.idpSelectedIndex];
+			const idp = state.identityProviders[state.idpMenuSelectedIndex];
 			providerName = idp.displayName;
 		}
 		else
@@ -761,14 +831,14 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 					onChange={this.searchTextFieldChanged}
 					onKeyPress={this.searchTextFieldKeyPress}
 				/>
-				<Button variant="outlined" onClick={this.identityProvidersButtonClicked}>
+				<Button variant="outlined" onClick={this.idpMenuButtonClicked}>
 					{providerName}
 				</Button>
 				<Menu
 					id="lock-menu"
-					anchorEl={state.idpButtonAnchor}
+					anchorEl={state.idpMenuButtonAnchor}
 					open={state.idpMenuOpen}
-					onClose={this.identityProvidersMenuClosed}
+					onClose={this.idpMenuClosed}
 					PaperProps={{
 						style: {
 							minHeight: 40,
@@ -778,17 +848,17 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				>
 					<MenuItem
 						key="-all-"
-						selected={state.idpSelectedIndex < 0}
-						onClick={this.identityProviderSelected.bind(this, -1)}
+						selected={state.idpMenuSelectedIndex < 0}
+						onClick={this.idpMenuItemSelected.bind(this, -1)}
 					>
 						All Providers
 					</MenuItem>
 					{state.identityProviders.map((idp, index) => {
-						const onClick = this.identityProviderSelected.bind(this, index);
+						const onClick = this.idpMenuItemSelected.bind(this, index);
 						return (
 							<MenuItem
 								key={idp.id}
-								selected={state.idpSelectedIndex == index}
+								selected={state.idpMenuSelectedIndex == index}
 								onClick={onClick}
 							>
 								<ListItemIcon className={classes.icon}>
@@ -822,141 +892,192 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 		return (
 			<div className={classes.section_searchResults}>
-			<Table className={classes.table}>
-				<TableBody>
-					{searchResults.results.map((searchResult, searchResultIdx) => {
+				<Table className={classes.table}>
+					<TableBody>
+						{searchResults.results.map((searchResult, searchResultIdx) => {
 
-						const match = searchResults.matches[searchResultIdx];
+							const user_id = searchResult.s4.user_id;
+							const identities = searchResult.auth0.identities;
 
-						const displayName = match.displayName;
-						const avatarUrl = this.imageUrlForIdentity(searchResult, match.identityIdx);
-
-						const identity = searchResult.auth0.identities[match.identityIdx]
-						const idpUrl = this.urlForIdentityProvier_signin(identity);
-
-						const avatarSection = (
-							<Avatar className={classes.avatar}>
-								<ReactImageFallback
-									src={avatarUrl || undefined}
-									initialImage={
-										<AccountCircleIcon className={classes.avatar} color="primary"/>
-									}
-									fallbackImage={
-										<AccountCircleIcon className={classes.avatar} color="primary"/>
-									}
-									width={64} height={64} />
-							</Avatar>
+							const match = searchResults.matches[searchResultIdx];
+							const identity = identities[match.identityIdx];
 							
-						);
-						
-						let displayNameSection;
-						if (match.boldRanges.length == 0)
-						{
-							displayNameSection = (
-								<span>{displayName}</span>
+							const displayName = match.displayName;
+
+							const idpUrl = this.urlForIdentityProvier_signin(identity);
+							const avatarUrl = this.imageUrlForIdentity(searchResult, identity);
+
+							const avatarSection = (
+								<Avatar className={classes.avatar}>
+									<ReactImageFallback
+										src={avatarUrl || undefined}
+										initialImage={
+											<AccountCircleIcon className={classes.avatar} color="primary"/>
+										}
+										fallbackImage={
+											<AccountCircleIcon className={classes.avatar} color="primary"/>
+										}
+										width={64} height={64} />
+								</Avatar>
+								
 							);
-						}
-						else
-						{
-							let lastIndex = 0;
-							displayNameSection = (
-								<React.Fragment>
-								{match.boldRanges.map((range, rangeIdx) => {
+							
+							let displayNameSection;
+							if (match.boldRanges.length == 0)
+							{
+								displayNameSection = (
+									<span key={user_id}>{displayName}</span>
+								);
+							}
+							else
+							{
+								let lastIndex = 0;
+								displayNameSection = (
+									<React.Fragment key={user_id}>
+									{match.boldRanges.map((range, rangeIdx) => {
 
-									const hasPrefix = range.indexStart > lastIndex;
-									const hasSuffix =
-									  (range.indexEnd < displayName.length) &&
-									  (rangeIdx == match.boldRanges.length - 1);
+										const hasPrefix = range.indexStart > lastIndex;
+										const hasSuffix =
+										(range.indexEnd < displayName.length) &&
+										(rangeIdx == match.boldRanges.length - 1);
 
-									if (hasPrefix && hasSuffix)
-									{
-										const a = displayName.substring(lastIndex, range.indexStart);
-										const b = displayName.substring(range.indexStart, range.indexEnd);
-										const c = displayName.substring(range.indexEnd);
+										if (hasPrefix && hasSuffix)
+										{
+											const a = displayName.substring(lastIndex, range.indexStart);
+											const b = displayName.substring(range.indexStart, range.indexEnd);
+											const c = displayName.substring(range.indexEnd);
 
-										return (
-											<React.Fragment>
-												<span>{a}</span>
+											return (
+												<React.Fragment key={`fragment_${rangeIdx}`}>
+													<span key={`a_${rangeIdx}`}>{a}</span>
+													<span key={`b_${rangeIdx}`} className={classes.spanBold}>{b}</span>
+													<span key={`c_${rangeIdx}`}>{c}</span>
+												</React.Fragment>
+											);
+										}
+										else if (hasPrefix)
+										{
+											const a = displayName.substring(lastIndex, range.indexStart);
+											const b = displayName.substring(range.indexStart, range.indexEnd);
+
+											return (
+												<React.Fragment key={`fragment_${rangeIdx}`}>
+													<span key={`a_${rangeIdx}`}>{a}</span>
+													<span key={`b_${rangeIdx}`} className={classes.spanBold}>{b}</span>
+												</React.Fragment>
+											);
+										}
+										else if (hasSuffix)
+										{
+											const b = displayName.substring(range.indexStart, range.indexEnd);
+											const c = displayName.substring(range.indexEnd);
+
+											return (
+												<React.Fragment key={`fragment_${rangeIdx}`}>
+													<span key={`b_${rangeIdx}`} className={classes.spanBold}>{b}</span>
+													<span key={`c_${rangeIdx}`}>{c}</span>
+												</React.Fragment>
+											);
+										}
+										else
+										{
+											const b = displayName.substring(range.indexStart, range.indexEnd);
+
+											return (
 												<span className={classes.spanBold}>{b}</span>
-												<span>{c}</span>
-											</React.Fragment>
-										);
-									}
-									else if (hasPrefix)
-									{
-										const a = displayName.substring(lastIndex, range.indexStart);
-										const b = displayName.substring(range.indexStart, range.indexEnd);
+											);
+										}
 
-										return (
-											<React.Fragment>
-												<span>{a}</span>
-												<span className={classes.spanBold}>{b}</span>
-											</React.Fragment>
-										);
-									}
-									else if (hasSuffix)
-									{
-										const b = displayName.substring(range.indexStart, range.indexEnd);
-										const c = displayName.substring(range.indexEnd);
+										lastIndex = range.indexEnd;
+									})}
+									</React.Fragment>
+								);
+							}
 
-										return (
-											<React.Fragment>
-												<span className={classes.spanBold}>{b}</span>
-												<span>{c}</span>
-											</React.Fragment>
-										);
-									}
-									else
-									{
-										const b = displayName.substring(range.indexStart, range.indexEnd);
-
-										return (
-											<span className={classes.spanBold}>{b}</span>
-										);
-									}
-
-									lastIndex = range.indexEnd;
-								})}
-								</React.Fragment>
+							const onClickOptions_obj : UserIdentsMenuButtonClickedOptions = {
+								userID      : user_id,
+								sourceIdx   : searchResultIdx,
+								selectedIdx : match.identityIdx
+							};
+							const onClickOptions_str = JSON.stringify(onClickOptions_obj, null, 0);
+							
+							return (
+								<TableRow key={searchResult.s4.user_id}>
+									<TableCell>
+										<div className={classes.tableRow_container}>
+											<div className={classes.tableRow_avatar}>
+												{avatarSection}
+											</div>
+											<div className={classes.tableRow_nameAndProvider}>
+												<Typography variant="headline">{displayNameSection}</Typography>
+												<img src={idpUrl} height="22" className={classes.signInImg}/>
+											</div>
+										</div>
+									</TableCell>
+									<TableCell>
+										<IconButton
+											onClick={this.userIdentsMenuButtonClicked}
+											data-mode={onClickOptions_str}
+										>
+										<Badge badgeContent={identities.length} color="primary">
+												<AccountCircleIcon />
+											</Badge>
+										</IconButton>
+									</TableCell>
+								</TableRow>
 							);
-						}
-						
-						return (
-							<TableRow key={searchResult.s4.user_id}>
-								<TableCell>
-									<div className={classes.tableRow_container}>
-										<div className={classes.tableRow_avatar}>
-											{avatarSection}
-										</div>
-										<div className={classes.tableRow_nameAndProvider}>
-											<Typography variant="headline">{displayNameSection}</Typography>
-											<img src={idpUrl} height="22" className={classes.signInImg}/>
-										</div>
-									</div>
-								</TableCell>
-								<TableCell>
-									<IconButton>
-									<Badge badgeContent={4} color="primary">
-											<AccountCircleIcon />
-										</Badge>
-									</IconButton>
-								</TableCell>
-							</TableRow>
-						);
-					})}
-				</TableBody>
-				<TableFooter>
-					<TableRow>
-						<TablePagination
-							count={searchResults.results.length}
-							rowsPerPage={rowsPerPage}
-							page={page}
-							onChangePage={this.searchResultsTable_changePage}
-							onChangeRowsPerPage={this.searchResultsTable_changeRowsPerPage}
-						/>
-					</TableRow>
-				</TableFooter>
-			</Table>
+						})}
+					</TableBody>
+					<TableFooter>
+						<TableRow>
+							<TablePagination
+								count={searchResults.results.length}
+								rowsPerPage={rowsPerPage}
+								page={page}
+								onChangePage={this.searchResultsTable_changePage}
+								onChangeRowsPerPage={this.searchResultsTable_changeRowsPerPage}
+							/>
+						</TableRow>
+					</TableFooter>
+				</Table>
+				{searchResults.results.map((searchResult, searchResultIdx) => {
+
+					const user_id = searchResult.s4.user_id;
+
+					log.debug(`userIdentsMenuOpen(${state.userIdentsMenuOpen}) ?== user_id(${user_id})`);
+
+					return (
+						<Menu
+							key={user_id}
+							anchorEl={state.userIdentsMenuAnchor}
+							open={state.userIdentsMenuOpen == user_id}
+							onClose={this.userIdentsMenuClosed}
+						>
+						{searchResult.auth0.identities.map((identity, identityIdx)=> {
+
+							const idpUrl = this.urlForIdentityProvider_64(identity);
+							const displayName = this.displayNameForIdentity(searchResult, identity);
+							
+							return (
+								<MenuItem
+									key={`${user_id}|${identity.user_id}`}
+									selected={state.userIdentsMenuSelectedIndex == identityIdx}
+								>
+									<ListItemIcon className={classes.icon}>
+										 <img src={idpUrl} width="32" height="32" />
+									</ListItemIcon>
+									<ListItemText
+										classes={{ primary: classes.primary }}
+										inset={true}
+										primary={displayName}
+									/>
+								</MenuItem>
+							);
+
+						})}
+						</Menu>
+					);
+				})}
 			</div>
 		);
 	}
@@ -966,9 +1087,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const {classes} = this.props;
 
 		let providerName: string;
-		if (state.idpSelectedIndex >= 0)
+		if (state.idpMenuSelectedIndex >= 0)
 		{
-			const idp = state.identityProviders[state.idpSelectedIndex];
+			const idp = state.identityProviders[state.idpMenuSelectedIndex];
 			providerName = idp.displayName;
 		}
 		else
