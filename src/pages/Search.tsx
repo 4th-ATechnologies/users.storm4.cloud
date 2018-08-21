@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as _ from 'lodash';
+import ReactImageFallback from 'react-image-fallback';
 import {isObject, isArray, isString}  from 'lodash';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
@@ -172,12 +173,6 @@ interface SearchMatchInfo {
 	points      : number
 }
 
-enum ImageVerificationState {
-	Valid,
-	Invalid,
-	CheckingValidation
-}
-
 interface ISearchProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
 }
 
@@ -191,8 +186,7 @@ interface ISearchState {
 	searchQueryIndex            : number, // if (searchQueryIndex > searchResultsIndex)
 	searchResultsIndex          : number, // then query is in progress
 	searchResults               : SearchResults|null
-	searchResultsPerPage        : number,
-	imageUrlVerifications       : Map<string, ImageVerificationState>
+	searchResultsPerPage        : number
 }
 
 class Search extends React.Component<ISearchProps, ISearchState> {
@@ -207,8 +201,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		searchQueryIndex            : 0,
 		searchResultsIndex          : 0,
 		searchResults               : null,
-		searchResultsPerPage        : 25,
-		imageUrlVerifications       : new Map<string, ImageVerificationState>()
+		searchResultsPerPage        : 25
 	};
 
 	private urlForIdentityProvider_64 = (idp: IdentityProvider|Auth0Identity)=> {
@@ -521,7 +514,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				}
 			}
 
-			const imgUrl = this.imageUrlForIdentity(searchResult, idx, {skipCheck: true});
+			const imgUrl = this.imageUrlForIdentity(searchResult, idx);
 			if (imgUrl != null) {
 				matchInfo.points++;
 			}
@@ -681,17 +674,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 	protected imageUrlForIdentity = (
 		searchResult  : SearchResult,
-		identityIdx   : number,
-		options      ?: {
-			skipCheck: boolean
-		}
+		identityIdx   : number
 	): string|null =>
 	{
-		let skipCheck = false;
-		if (options) {
-			skipCheck = options.skipCheck;
-		}
-
 		const s4 = searchResult.s4;
 		const identity = searchResult.auth0.identities[identityIdx];
 
@@ -739,78 +724,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			}
 		}
 
-		if (url && !skipCheck)
-		{
-			if (!this.verifyImageUrl(url)) {
-				url = null;
-			}
-		}
-
 		return url;
-	}
-
-	protected verifyImageUrl = (url: string): boolean => {
-
-		const existingState = this.state.imageUrlVerifications.get(url);
-		if (existingState != undefined)
-		{
-			if (existingState == ImageVerificationState.Valid) {
-				return true;
-			}
-			else {
-				return false;
-			}
-		}
-
-		log.debug("Verifying image for: "+ url);
-
-		// Note: We are purposefully setting the flag WITHOUT calling setState()
-		// There's no reason to trigger a re-render because of this.
-		// 
-		this.state.imageUrlVerifications.set(url, ImageVerificationState.CheckingValidation);
-
-		let newState: ImageVerificationState|null = null;
-
-		fetch(url, {
-			method: "GET",
-			redirect: "follow",
-		//	headers: {
-		//		'Access-Control-Request-Method': 'GET'
-		//	}
-
-		}).then((response)=> {
-
-			const statusCode = response.status;
-			log.debug(`OPTIONS '${url}': ${statusCode}`);
-
-			if (statusCode == 200) {
-				newState = ImageVerificationState.Valid;
-			}
-			else {
-				newState = ImageVerificationState.Invalid;
-			}
-
-		}).catch((err)=> {
-
-			log.err(`OPTIONS '${url}': ${err}`);
-			newState = ImageVerificationState.Invalid;
-
-		}).then(()=> { // .finally()
-
-			log.debug(`OPTIONS '${url}':=> ${newState}`);
-			this.setState((current) => {
-				
-				if (newState == null) {
-					current.imageUrlVerifications.delete(url);
-				} else {
-					current.imageUrlVerifications.set(url, newState);
-				}
-				
-				return current;
-			});
-		});
-
-		return false;
 	}
 
 	protected renderSearchFields() {
@@ -920,18 +834,20 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						const identity = searchResult.auth0.identities[match.identityIdx]
 						const idpUrl = this.urlForIdentityProvier_signin(identity);
 
-						let avatarSection;
-						if (avatarUrl) {
-							avatarSection = (
-								<Avatar className={classes.avatar} src={avatarUrl!} />
-							);
-						} else {
-							avatarSection = (
-								<Avatar className={classes.avatar}>
-									<AccountCircleIcon className={classes.avatar} color="primary"/>
-								</Avatar>
-							);
-						}
+						const avatarSection = (
+							<Avatar className={classes.avatar}>
+								<ReactImageFallback
+									src={avatarUrl || undefined}
+									initialImage={
+										<AccountCircleIcon className={classes.avatar} color="primary"/>
+									}
+									fallbackImage={
+										<AccountCircleIcon className={classes.avatar} color="primary"/>
+									}
+									width={64} height={64} />
+							</Avatar>
+							
+						);
 						
 						let displayNameSection;
 						if (match.boldRanges.length == 0)
