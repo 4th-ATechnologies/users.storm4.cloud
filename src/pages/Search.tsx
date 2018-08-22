@@ -134,7 +134,6 @@ interface Auth0Identity {
 	profileData : any
 }
 
-// This is how we receive it from the server
 interface SearchResult {
 	s4 : {
 		user_id : string,
@@ -147,7 +146,9 @@ interface SearchResult {
 			preferedAuth0ID  ?: string,
 			preferredAuth0ID ?: string
 		},
-		identities: Auth0Identity[]
+		identities : Auth0Identity[],
+		matches    : SearchMatchInfo[], // added during post-processing
+		displayIdx : number             // added during post-processing
 	}
 }
 
@@ -158,7 +159,6 @@ interface SearchResults {
 	limit    : number,
 	offset   : number,
 	results  : SearchResult[],
-	matches  : SearchMatchInfo[]
 }
 
 interface StringRange {
@@ -167,8 +167,7 @@ interface StringRange {
 }
 
 interface SearchMatchInfo {
-	identityIdx : number,
-	displayName : string,
+	idx         : number,
 	boldRanges  : StringRange[],
 	points      : number
 }
@@ -433,7 +432,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			limit    : state.searchResultsPerPage,
 			offset   : (state.searchResultsPerPage * page),
 			results  : [],
-			matches  : []
 		};
 
 		if (search_query.length == 0)
@@ -485,18 +483,13 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				// 
 				searchResults.query = search_query;
 
-				// Now we need to calculate various information about how each search result
-				// matches the query.
+				// Now we need to calculate various information about how
+				// each search result matches the given query.
 				// 
-				const matches: SearchMatchInfo[] = [];
-
 				for (const searchResult of searchResults.results)
 				{
-					const match = this.matchInfoForSearchResult(search_query, searchResult);
-					matches.push(match);
+					this.postProcessSearchResult(search_query, searchResult);
 				}
-
-				searchResults.matches = matches;
 			}
 
 		}).catch((reason)=> {
@@ -545,10 +538,10 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		// Todo...
 	};
 
-	protected matchInfoForSearchResult = (
+	protected postProcessSearchResult = (
 		query        : string,
 		searchResult : SearchResult
-	): SearchMatchInfo =>
+	): void =>
 	{
 		const queryComponents = query.split(' ').filter((str)=> {
 			return str.length > 0;
@@ -558,22 +551,27 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 		log.debug('queryComponents: '+ queryComponents);
 
-		const matchInfos: SearchMatchInfo[] = [];
+		const identities = searchResult.auth0.identities;
+		searchResult.auth0.matches = [];
 
-		searchResult.auth0.identities.forEach((identity, idx) => {
+		identities.forEach((identity, identityIdx) => {
 
 			const matchInfo: SearchMatchInfo = {
-				identityIdx : idx,
-				displayName : this.displayNameForIdentity(searchResult, identity),
-				boldRanges  : [],
-				points      : 0
+				idx        : identityIdx,
+				boldRanges : [],
+				points     : 0
 			};
 
-			const displayName_lowerCase = matchInfo.displayName.toLowerCase();
+			const displayName = this.displayNameForIdentity(searchResult, identity).toLowerCase();
+
+			const imgUrl = this.imageUrlForIdentity(searchResult, identity);
+			if (imgUrl != null) {
+				matchInfo.points++;
+			}
 
 			for (const queryComponent of queryComponents)
 			{
-				const matchIndex = displayName_lowerCase.indexOf(queryComponent);
+				const matchIndex = displayName.indexOf(queryComponent);
 				if (matchIndex >= 0)
 				{
 					const range: StringRange = {
@@ -586,15 +584,54 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				}
 			}
 
-			const imgUrl = this.imageUrlForIdentity(searchResult, identity);
-			if (imgUrl != null) {
-				matchInfo.points++;
+			// The queryComponents could be something like: [
+			//   'foo',
+			//   'foob'
+			// ]
+			// 
+			// And the displayName could be: 'foobar'
+			// 
+			// So the boldRanges would overlap: [
+			//   {0, 3},
+			//   {0, 4}
+			// ]
+			//
+			// So we need to merge all the ranges.
+			// 
+			if (matchInfo.boldRanges.length > 0)
+			{
+				const stack: StringRange[] = [];
+
+				matchInfo.boldRanges.sort((a, b)=> {
+					return a.indexStart - b.indexStart;
+				});
+
+				stack.push(matchInfo.boldRanges[0]);
+
+				matchInfo.boldRanges.slice(1).forEach((range, i)=> {
+
+					const top = stack[stack.length - 1];
+			
+					if (top.indexEnd < range.indexStart) {
+			
+						// No overlap, push range onto stack
+						stack.push(range);
+
+					} else if (top.indexEnd < range.indexEnd) {
+			
+						// Update previous range
+						top.indexEnd = range.indexEnd;
+					}
+				});
+
+				matchInfo.boldRanges = stack;
 			}
 
-			matchInfos.push(matchInfo);
+			searchResult.auth0.matches.push(matchInfo);
 		});
 
-		matchInfos.sort((a, b)=> {
+		const sortedMatches = Array.from(searchResult.auth0.matches);
+		sortedMatches.sort((a, b)=> {
 
 			// If compareFunction(a, b) returns less than 0,
 			// sort a to an index lower than b, i.e. a comes first.
@@ -618,8 +655,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			  searchResult.auth0.user_metadata.preferedAuth0ID ||
 			  searchResult.auth0.user_metadata.preferredAuth0ID;
 
-			const a_identity = searchResult.auth0.identities[a.identityIdx];
-			const b_identity = searchResult.auth0.identities[b.identityIdx];
+			const a_identity = searchResult.auth0.identities[a.idx];
+			const b_identity = searchResult.auth0.identities[b.idx];
 
 			const a_id = a_identity.provider +'|'+ a_identity.user_id;
 			const b_id = b_identity.provider +'|'+ b_identity.user_id;
@@ -635,53 +672,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			return diff;
 		});
 
-		const result = matchInfos[0];
-
-		// We have one last thing to do.
-		// The queryComponents may be: [
-		//   'foo',
-		//   'foob'
-		// ]
-		// 
-		// And the displayName could be: 'foobar'
-		// 
-		// So the boldRanges would overlap: [
-		//   {0, 3},
-		//   {0, 4}
-		// ]
-		//
-		// So we want to merge all the ranges.
-		// 
-		if (result.boldRanges.length > 0)
-		{
-			const stack: StringRange[] = [];
-
-			result.boldRanges.sort((a, b)=> {
-				return a.indexStart - b.indexStart;
-			});
-
-			stack.push(result.boldRanges[0]);
-
-			result.boldRanges.slice(1).forEach((range, i)=> {
-
-				const top = stack[stack.length - 1];
-		  
-				if (top.indexEnd < range.indexStart) {
-		  
-					// No overlap, push range onto stack
-					stack.push(range);
-
-				} else if (top.indexEnd < range.indexEnd) {
-		  
-					// Update previous range
-					top.indexEnd = range.indexEnd;
-				}
-			});
-
-			result.boldRanges = stack;
-		}
-
-		return result;
+		const bestMatchIdx = sortedMatches[0].idx;
+		searchResult.auth0.displayIdx = bestMatchIdx;
 	}
 
 	protected initialsForDisplayName = (
@@ -897,12 +889,16 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						{searchResults.results.map((searchResult, searchResultIdx) => {
 
 							const user_id = searchResult.s4.user_id;
-							const identities = searchResult.auth0.identities;
 
-							const match = searchResults.matches[searchResultIdx];
-							const identity = identities[match.identityIdx];
+							const identities = searchResult.auth0.identities;
+							const matches = searchResult.auth0.matches;
+
+							const displayIdx = searchResult.auth0.displayIdx;
+
+							const identity = identities[displayIdx];
+							const match = matches[displayIdx];
 							
-							const displayName = match.displayName;
+							const displayName = this.displayNameForIdentity(searchResult, identity);
 
 							const idpUrl = this.urlForIdentityProvier_signin(identity);
 							const avatarUrl = this.imageUrlForIdentity(searchResult, identity);
@@ -997,7 +993,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 							const onClickOptions_obj : UserIdentsMenuButtonClickedOptions = {
 								userID      : user_id,
 								sourceIdx   : searchResultIdx,
-								selectedIdx : match.identityIdx
+								selectedIdx : displayIdx
 							};
 							const onClickOptions_str = JSON.stringify(onClickOptions_obj, null, 0);
 							
