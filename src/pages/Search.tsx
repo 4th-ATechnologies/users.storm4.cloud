@@ -322,7 +322,11 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		});
 	}
 
-	protected idpMenuItemSelected = (index: number)=> {
+	protected idpMenuItemSelected = (
+		index: number,
+		event: React.MouseEvent<HTMLElement>
+	): void =>
+	{
 		log.debug(`idpMenuItemSelected(${index})`);
 
 		this.setState({
@@ -342,40 +346,49 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 	}
 
 	protected userIdentsMenuButtonClicked = (
+		options : UserIdentsMenuButtonClickedOptions,
 		event   : React.MouseEvent<HTMLElement>
 	): void => {
 		log.debug("userIdentsMenuButtonClicked()");
-
-		const str = event.currentTarget.dataset.mode!;
-
-		let options: UserIdentsMenuButtonClickedOptions|null = null;
-		try {
-			options = JSON.parse(str);
-		} catch(e) {
-			log.err("Error parsing dataset.mode: "+ e);
-		}
 		
-		if (options)
-		{
-			this.setState({
-				userIdentsMenuAnchor        : event.currentTarget,
-				userIdentsMenuOpen          : options.userID,
-				userIdentsMenuSourceIndex   : options.sourceIdx,
-				userIdentsMenuSelectedIndex : options.selectedIdx,
-			});
-		}
+		this.setState({
+			userIdentsMenuAnchor        : event.currentTarget,
+			userIdentsMenuOpen          : options.userID,
+			userIdentsMenuSourceIndex   : options.sourceIdx,
+			userIdentsMenuSelectedIndex : options.selectedIdx,
+		});
 	}
 
-	protected userIdentsMenuItemSelected = (index: number)=> {
+	protected userIdentsMenuItemSelected = (
+		index : number,
+		event : React.MouseEvent<HTMLElement>
+	): void =>
+	{
 		log.debug(`userIdentsMenuItemSelected(${index})`);
 
-		// Todo...
+		this.setState((current)=> {
 
-		this.setState({
-			userIdentsMenuAnchor        : null,
-			userIdentsMenuOpen          : null,
-			userIdentsMenuSourceIndex   : 0,
-			userIdentsMenuSelectedIndex : 0,
+			const s: ISearchState = {
+				...current,
+			};
+			
+			if (s.searchResults)
+			{
+				const results = s.searchResults.results;
+				const source = s.userIdentsMenuSourceIndex;
+
+				if (source >= 0 && source < results.length)
+				{
+					results[source].auth0.displayIdx = index;
+				}
+			}
+
+			s.userIdentsMenuAnchor        = null;
+			s.userIdentsMenuOpen          = null;
+			s.userIdentsMenuSourceIndex   = -1;
+			s.userIdentsMenuSelectedIndex = -1;
+
+			return s;
 		});
 	}
 
@@ -385,8 +398,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		this.setState({
 			userIdentsMenuAnchor        : null,
 			userIdentsMenuOpen          : null,
-			userIdentsMenuSourceIndex   : 0,
-			userIdentsMenuSelectedIndex : 0,
+			userIdentsMenuSourceIndex   : -1,
+			userIdentsMenuSelectedIndex : -1,
 		});
 	}
 
@@ -846,14 +859,13 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						All Providers
 					</MenuItem>
 					{state.identityProviders.map((idp, index) => {
-						const onClick = this.idpMenuItemSelected.bind(this, index);
 						return (
 							<MenuItem
 								key={idp.id}
 								selected={state.idpMenuSelectedIndex == index}
-								onClick={onClick}
+								onClick={this.idpMenuItemSelected.bind(this, index)}
 							>
-								<ListItemIcon className={classes.icon}>
+								<ListItemIcon>
 							 		<img src={this.urlForIdentityProvider_64(idp)} width="32" height="32" />
 								</ListItemIcon>
 								<ListItemText
@@ -990,12 +1002,12 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 								);
 							}
 
-							const onClickOptions_obj : UserIdentsMenuButtonClickedOptions = {
+							const onClickOptions: UserIdentsMenuButtonClickedOptions = {
 								userID      : user_id,
 								sourceIdx   : searchResultIdx,
 								selectedIdx : displayIdx
 							};
-							const onClickOptions_str = JSON.stringify(onClickOptions_obj, null, 0);
+							const onClick = this.userIdentsMenuButtonClicked.bind(this, onClickOptions);
 							
 							return (
 								<TableRow key={searchResult.s4.user_id}>
@@ -1011,10 +1023,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 										</div>
 									</TableCell>
 									<TableCell>
-										<IconButton
-											onClick={this.userIdentsMenuButtonClicked}
-											data-mode={onClickOptions_str}
-										>
+										<IconButton onClick={onClick}>
 										<Badge badgeContent={identities.length} color="primary">
 												<AccountCircleIcon />
 											</Badge>
@@ -1052,15 +1061,32 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						{searchResult.auth0.identities.map((identity, identityIdx)=> {
 
 							const idpUrl = this.urlForIdentityProvider_64(identity);
+							const idUrl = this.imageUrlForIdentity(searchResult, identity);
 							const displayName = this.displayNameForIdentity(searchResult, identity);
 							
+							const onClick = this.userIdentsMenuItemSelected.bind(this, identityIdx);
+
 							return (
 								<MenuItem
 									key={`${user_id}|${identity.user_id}`}
 									selected={state.userIdentsMenuSelectedIndex == identityIdx}
+									onClick={onClick}
 								>
-									<ListItemIcon className={classes.icon}>
+									<ListItemIcon>
 										 <img src={idpUrl} width="32" height="32" />
+									</ListItemIcon>
+									<ListItemIcon>
+										<ReactImageFallback
+											src={idUrl || undefined}
+											initialImage={
+												<AccountCircleIcon color="primary" width={32} height={32}/>
+											}
+											fallbackImage={
+												<AccountCircleIcon color="primary" width={32} height={32}/>
+											}
+											width={32}
+											height={32}
+										/>
 									</ListItemIcon>
 									<ListItemText
 										classes={{ primary: classes.primary }}
