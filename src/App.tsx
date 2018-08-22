@@ -2,10 +2,10 @@ import * as React from 'react';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 
-import Search from './pages/Search'
-
 import imgLogo58 from './images/logo58.png';
 import imgHeaderBackground from './images/background2.jpg'
+
+import MainPage from './pages/MainPage'
 
 // Material UI
 
@@ -44,7 +44,8 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	center: {
 		display: 'flex',
 		flexGrow: 1,
-		padding: theme.spacing.unit * 3,
+		margin: 0,
+		padding: 0,
 		maxWidth: '900px',
 	},
 	footer: {
@@ -100,7 +101,7 @@ class App extends React.Component<IAppProps, IAppState> {
 					</div>
 				</div>
 				<div className={classes.center}>
-					<Search/>
+					<MainPage/>
 				</div>
 				<div className={classes.footer}>
 				</div>

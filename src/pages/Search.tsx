@@ -24,7 +24,6 @@ import Button from '@material-ui/core/Button';
 import CircularProgress from '@material-ui/core/CircularProgress';
 import Divider from '@material-ui/core/Divider';
 import IconButton from '@material-ui/core/IconButton';
-import Grid from '@material-ui/core/Grid';
 import List from '@material-ui/core/List';
 import ListItem from '@material-ui/core/ListItem';
 import ListItemIcon from '@material-ui/core/ListItemIcon';
@@ -39,6 +38,7 @@ import TableHead from '@material-ui/core/TableHead';
 import TablePagination from '@material-ui/core/TablePagination';
 import TableRow from '@material-ui/core/TableRow';
 import TextField from '@material-ui/core/TextField'
+import Tooltip from '@material-ui/core/Tooltip';
 import Typography from '@material-ui/core/Typography';
 
 import AccountCircleIcon from '@material-ui/icons/AccountCircle';
@@ -48,14 +48,23 @@ const log = Logger.Make('debug', 'Search');
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
+		margin: 0,
+		padding: 0
 	},
 	section_explanation: {
 		textAlign: 'center',
+		margin: 0,
+		paddingLeft: 0,
+		paddingRight: 0,
 		paddingTop: theme.spacing.unit * 2,
 		paddingBottom: theme.spacing.unit * 5,
 	},
+	explanation_title: {
+		margin: 0,
+		padding: 0
+	},
 	section_searchFields: {
-	//	marginLeft: theme.spacing.unit,
+		marginLeft: theme.spacing.unit,
 	//	marginRight: theme.spacing.unit
 	},
 	section_searchResults: {
@@ -63,7 +72,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	//	marginRight: theme.spacing.unit
 	},
 	searchTextField: {
-		width: 225,
+		width: 175,
 		marginRight: 12
 	},
 	progress: {
@@ -76,18 +85,22 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginTop: theme.spacing.unit * 2,
 	//	backgroundColor: 'pink'
 	},
-	tableRow_container: {
+	tableRow_containerIdentity: {
 		display: 'flex',
 		flexDirection: 'row',
 		flexWrap: 'nowrap',
 		justifyContent: 'flex-start',
 		alignItems: 'center',
 		alignContent: 'center',
-		marginTop: 2,
-		marginBottom: 2
+		marginLeft: theme.spacing.unit,
+		marginRight: theme.spacing.unit,
+		marginTop: 4,
+		marginBottom: 4
 	},
 	tableRow_avatar: {
 		flexBasis: 'auto',
+		margin: 0,
+		padding: 0,
 		width: 64,
 		height: 64
 	},
@@ -106,6 +119,18 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		alignContent: 'flex-start',
 		marginLeft: 16
 	},
+	tableRow_containerButtons: {
+		display: 'flex',
+		flexDirection: 'row',
+		flexWrap: 'nowrap',
+		justifyContent: 'flex-end',
+		alignItems: 'center',
+		alignContent: 'center',
+		marginLeft: theme.spacing.unit,
+		marginRight: theme.spacing.unit,
+		marginTop: 4,
+		marginBottom: 4
+	},
 	signInImg: {
 		backgroundColor: 'rgb(255,255,255)',
 		paddingLeft: 6,
@@ -116,6 +141,18 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	},
 	spanBold: {
 		fontWeight: "bold"
+	},
+	listItemIcon_avatarSmall: {
+		// The other ListItemIcon's have this marginRight value.
+		// So we add it to match.
+		marginRight: theme.spacing.unit * 2,
+
+		width: 32,
+		height: 32
+	},
+	sendIcon: {
+		width: 24,
+		height: 24
 	}
 });
 
@@ -195,19 +232,24 @@ interface ISearchState {
 	idpMenuOpen                 : boolean,
 	idpMenuSelectedIndex        : number,
 
+	// Searching
+	// 
 	searchTextFieldStr          : string,
 	searchQueryIndex            : number, // if (searchQueryIndex > searchResultsIndex)
 	searchResultsIndex          : number, // then query is in progress
 	searchResults               : SearchResults|null
 	searchResultsPerPage        : number,
 
+	// User identity menu
 	userIdentsMenuAnchor        : HTMLElement|null,
 	userIdentsMenuOpen          : string|null,
 	userIdentsMenuSourceIndex   : number, // state.searchResults.results[here]
-	userIdentsMenuSelectedIndex : number,
+	userIdentsMenuSelectedIndex : number
 }
 
 class Search extends React.Component<ISearchProps, ISearchState> {
+
+	private lastTableButtonClick: number = 0;
 
 	public state: ISearchState = {
 		isFetchingIdentityProviders : false,
@@ -226,10 +268,10 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		userIdentsMenuAnchor        : null,
 		userIdentsMenuOpen          : null,
 		userIdentsMenuSourceIndex   : 0, // state.searchResults.results[here]
-		userIdentsMenuSelectedIndex : 0,
+		userIdentsMenuSelectedIndex : 0
 	};
 
-	private urlForIdentityProvider_64 = (idp: IdentityProvider|Auth0Identity)=> {
+	private imageUrlForIdentityProvider_64 = (idp: IdentityProvider|Auth0Identity)=> {
 
 		let idp_id: string;
 		if ((idp as IdentityProvider).id) {
@@ -242,7 +284,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		return `https://s3-us-west-2.amazonaws.com/com.4th-a.resources/socialmediaicons/64x64/${idp_id}.png`;
 	}
 
-	private urlForIdentityProvier_signin = (idp: IdentityProvider|Auth0Identity)=> {
+	private imageUrlForIdentityProvier_signin = (idp: IdentityProvider|Auth0Identity)=> {
 
 		let idp_id: string;
 		if ((idp as IdentityProvider).id) {
@@ -355,8 +397,10 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			userIdentsMenuAnchor        : event.currentTarget,
 			userIdentsMenuOpen          : options.userID,
 			userIdentsMenuSourceIndex   : options.sourceIdx,
-			userIdentsMenuSelectedIndex : options.selectedIdx,
+			userIdentsMenuSelectedIndex : options.selectedIdx
 		});
+
+		this.lastTableButtonClick = Date.now();
 	}
 
 	protected userIdentsMenuItemSelected = (
@@ -412,15 +456,25 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		this.setState({
 			searchTextFieldStr: newValue
 		});
+	//	this.submitSearch();
 	}
 
 	protected searchTextFieldKeyPress = (
 		event: React.KeyboardEvent<HTMLDivElement>
-	) => {
+	): void => {
+		log.debug("searchTextFieldKeyPress().type =>"+ event.type);
+
 		if (event.key === 'Enter')
 		{
 			this.submitSearch();
 		}
+	}
+
+	protected searchTextFieldClick = (
+		event: React.MouseEvent<HTMLDivElement>
+	): void =>
+	{
+		log.debug("searchTextFieldKeyPress().type =>"+ event.type);
 	}
 
 	protected submitSearch = (page ?: number)=> {
@@ -531,25 +585,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			});
 		});
 	}
-
-	protected searchResultsTable_changePage = (
-		event: React.MouseEvent<HTMLButtonElement>,
-		page: number
-	): void =>
-	{
-		log.debug("searchResultsTable_changePage()");
-
-		// Todo...
-	};
-
-	protected searchResultsTable_changeRowsPerPage = (
-		event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-	): void =>
-	{
-		log.debug("searchResultsTable_changeRowsPerPage()");
-
-		// Todo...
-	};
 
 	protected postProcessSearchResult = (
 		query        : string,
@@ -750,8 +785,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		identity     : Auth0Identity
 	): string|null =>
 	{
-		
-
 		let url: string|null = null;
 
 		if (identity.provider == "auth0")
@@ -802,7 +835,47 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		return url;
 	}
 
-	protected renderSearchFields() {
+	protected searchResultsTable_changePage = (
+		event: React.MouseEvent<HTMLButtonElement>,
+		page: number
+	): void =>
+	{
+		log.debug("searchResultsTable_changePage()");
+
+		// Todo...
+	};
+
+	protected searchResultsTable_changeRowsPerPage = (
+		event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+	): void =>
+	{
+		log.debug("searchResultsTable_changeRowsPerPage()");
+
+		// Todo...
+	};
+
+	protected searchResultsTable_selectUser = (
+		user_id : string,
+		event   : string
+	): void =>
+	{
+		log.debug("searchResultsTable_selectUser(): "+ user_id);
+
+		// This method is ALSO called when the tableCell buttons are clicked.
+		// Luckily it's called afterwards.
+		// So we setup this little "time ellapsed" workaround to ignore when click is on a button.
+
+		const now = Date.now();
+		const last = this.lastTableButtonClick;
+		const diff = now - last;
+
+		if (diff > 20)
+		{
+			this.props.history.push(`/${user_id}`);
+		}
+	}
+
+	protected renderSearchFields(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
 
@@ -835,6 +908,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 					margin="normal"
 					onChange={this.searchTextFieldChanged}
 					onKeyPress={this.searchTextFieldKeyPress}
+					onClick={this.searchTextFieldClick}
+					
 				/>
 				<Button variant="outlined" onClick={this.idpMenuButtonClicked}>
 					{providerName}
@@ -846,7 +921,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 					onClose={this.idpMenuClosed}
 					PaperProps={{
 						style: {
-							minHeight: 40,
 							maxHeight: 415
 						}
 					}}
@@ -866,7 +940,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 								onClick={this.idpMenuItemSelected.bind(this, index)}
 							>
 								<ListItemIcon>
-							 		<img src={this.urlForIdentityProvider_64(idp)} width="32" height="32" />
+							 		<img src={this.imageUrlForIdentityProvider_64(idp)} width="32" height="32" />
 								</ListItemIcon>
 								<ListItemText
 									classes={{ primary: classes.primary }}
@@ -882,7 +956,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		);
 	}
 
-	public renderSearchResultsTable() {
+	public renderSearchResultsTable(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
 
@@ -912,7 +986,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 							
 							const displayName = this.displayNameForIdentity(searchResult, identity);
 
-							const idpUrl = this.urlForIdentityProvier_signin(identity);
+							const idpUrl = this.imageUrlForIdentityProvier_signin(identity);
 							const avatarUrl = this.imageUrlForIdentity(searchResult, identity);
 
 							const avatarSection = (
@@ -1002,17 +1076,19 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 								);
 							}
 
+							const onClick = this.searchResultsTable_selectUser.bind(this, user_id);
+
 							const onClickOptions: UserIdentsMenuButtonClickedOptions = {
 								userID      : user_id,
 								sourceIdx   : searchResultIdx,
 								selectedIdx : displayIdx
 							};
-							const onClick = this.userIdentsMenuButtonClicked.bind(this, onClickOptions);
+							const onClickIdentities = this.userIdentsMenuButtonClicked.bind(this, onClickOptions);
 							
 							return (
-								<TableRow key={searchResult.s4.user_id}>
-									<TableCell>
-										<div className={classes.tableRow_container}>
+								<TableRow key={searchResult.s4.user_id} hover={true} onClick={onClick}>
+									<TableCell padding="none">
+										<div className={classes.tableRow_containerIdentity}>
 											<div className={classes.tableRow_avatar}>
 												{avatarSection}
 											</div>
@@ -1022,12 +1098,21 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 											</div>
 										</div>
 									</TableCell>
-									<TableCell>
-										<IconButton onClick={onClick}>
-										<Badge badgeContent={identities.length} color="primary">
-												<AccountCircleIcon />
-											</Badge>
-										</IconButton>
+									<TableCell padding="none">
+										<div className={classes.tableRow_containerButtons}>
+											<Tooltip title="Show all identities linked to user's account.">
+												<IconButton onClick={onClickIdentities}>
+													<Badge badgeContent={identities.length} color="primary">
+														<AccountCircleIcon />
+													</Badge>
+												</IconButton>
+											</Tooltip>
+											<Tooltip title="Send file(s) to user.">
+												<IconButton onClick={onClick}>
+													<SendIcon className={classes.sendIcon}/>
+												</IconButton>
+											</Tooltip>
+										</div>
 									</TableCell>
 								</TableRow>
 							);
@@ -1060,7 +1145,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						>
 						{searchResult.auth0.identities.map((identity, identityIdx)=> {
 
-							const idpUrl = this.urlForIdentityProvider_64(identity);
+							const idpUrl = this.imageUrlForIdentityProvider_64(identity);
 							const idUrl = this.imageUrlForIdentity(searchResult, identity);
 							const displayName = this.displayNameForIdentity(searchResult, identity);
 							
@@ -1079,10 +1164,10 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 										<ReactImageFallback
 											src={idUrl || undefined}
 											initialImage={
-												<AccountCircleIcon color="primary" width={32} height={32}/>
+												<AccountCircleIcon className={classes.listItemIcon_avatarSmall} color="primary"/>
 											}
 											fallbackImage={
-												<AccountCircleIcon color="primary" width={32} height={32}/>
+												<AccountCircleIcon className={classes.listItemIcon_avatarSmall} color="primary"/>
 											}
 											width={32}
 											height={32}
@@ -1104,7 +1189,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		);
 	}
 
-	public render() {
+	public render(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
 
@@ -1125,7 +1210,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		return (
 			<div className={classes.root}>
 				<div className={classes.section_explanation}>
-					<Typography variant="display2" >
+					<Typography variant="display2" className={classes.explanation_title} >
 						Send Files Securely
 					</Typography><br/>
 					<Typography variant="subheading">
