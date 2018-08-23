@@ -1,3 +1,12 @@
+
+export interface IdentityProvider {
+	id          : string,
+	displayName : string,
+	type        : number,
+	eTag_64x64  : string,
+	eTag_signin : string
+}
+
 export interface UserInfo {
 	user_id : string,
 	bucket  : string,
@@ -23,4 +32,26 @@ export interface Auth0Profile {
 export interface UserProfile {
 	s4    : UserInfo,
 	auth0 : Auth0Profile
+}
+
+export interface PubKey {
+	version               : number,
+	keySuite              : string,
+	keyID                 : string,
+	pubKey                : string,
+	"start-date"          : string,
+	userID                : string,
+	auth0ID               : string,
+	"signable-properties" : string[],
+	signatures            : PubKeySignature[]
+}
+
+export interface PubKeySignature {
+	sigID               : string,
+	hashAlgorithm       : string,
+	signature           : string,
+	issuer              : string,
+	"issue-date"        : string,
+	"sig-expire"        : number,
+	"signed-properties" : string[]
 }

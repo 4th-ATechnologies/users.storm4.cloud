@@ -2,6 +2,7 @@ import * as _ from 'lodash';
 import * as LRU from 'lru-cache';
 
 import * as api_gateway from './APIGateway';
+import * as util from './Util';
 
 import {Logger} from '../util/Logging'
 
@@ -45,10 +46,7 @@ export function fetchUserProfile(
 		return;
 	}
 
-	const host = api_gateway.getHost();
-	const path = api_gateway.getPath(`/users/info/${user_id}`);
-
-	const url = `https://${host}${path}`;
+	const url = util.profileUrlForUser(user_id);
 	
 	fetch(url, {
 		method: "GET"

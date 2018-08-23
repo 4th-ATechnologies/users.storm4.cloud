@@ -51,7 +51,7 @@ class Main extends React.Component<IMainProps, IMainState> {
 		
 		log.debug("pathname: "+ pathname);
 
-		if (util.is_valid_user_id(pathname))
+		if (util.isValidUserID(pathname))
 		{
 			return (
 				<SendPage user_id={pathname} />

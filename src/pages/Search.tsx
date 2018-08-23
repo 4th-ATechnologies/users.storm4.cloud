@@ -7,12 +7,16 @@ import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 
 import * as api_gateway from '../util/APIGateway';
+import * as util from '../util/Util';
+
 import {Logger} from '../util/Logging'
 
 import {
 	UserInfo,
 	Auth0Identity,
-	Auth0Profile
+	Auth0Profile,
+	UserProfile,
+	IdentityProvider
 } from '../models/users'
 
 // Material UI
@@ -52,6 +56,8 @@ import AccountCircleIcon from '@material-ui/icons/AccountCircle';
 import SendIcon from '@material-ui/icons/Send';
 
 const log = Logger.Make('debug', 'Search');
+
+const AVATAR_SIZE = 64;
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
@@ -108,14 +114,19 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		flexBasis: 'auto',
 		margin: 0,
 		padding: 0,
-		width: 64,
-		height: 64
+		width: AVATAR_SIZE,
+		height: AVATAR_SIZE
 	},
 	avatar: {
 		margin: 0,
 		padding: 0,
-		width: 64,
-		height: 64
+		width: AVATAR_SIZE,
+		height: AVATAR_SIZE,
+		boxShadow: '#C1C1C1 0px 0px 2px'
+	},
+	avatarImg: {
+		width: AVATAR_SIZE,
+		height: AVATAR_SIZE
 	},
 	tableRow_nameAndProvider: {
 		display: 'flex',
@@ -141,7 +152,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginTop: 2,
 		marginBottom: 2
 	},
-	signInImg: {
+	identityProviderImg: {
 		backgroundColor: 'rgb(255,255,255)',
 		paddingLeft: 6,
 		paddingRight: 6,
@@ -165,14 +176,6 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		height: 24
 	}
 });
-
-interface IdentityProvider {
-	id          : string,
-	displayName : string,
-	type        : number,
-	eTag_64x64  : string,
-	eTag_signin : string
-}
 
 interface Auth0Profile_SearchResult extends Auth0Profile {
 	/* 
@@ -269,32 +272,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		userIdentsMenuSourceIndex   : 0, // state.searchResults.results[here]
 		userIdentsMenuSelectedIndex : 0
 	};
-
-	private imageUrlForIdentityProvider_64 = (idp: IdentityProvider|Auth0Identity)=> {
-
-		let idp_id: string;
-		if ((idp as IdentityProvider).id) {
-			idp_id = (idp as IdentityProvider).id
-		}
-		else {
-			idp_id = (idp as Auth0Identity).provider;
-		}
-
-		return `https://s3-us-west-2.amazonaws.com/com.4th-a.resources/socialmediaicons/64x64/${idp_id}.png`;
-	}
-
-	private imageUrlForIdentityProvier_signin = (idp: IdentityProvider|Auth0Identity)=> {
-
-		let idp_id: string;
-		if ((idp as IdentityProvider).id) {
-			idp_id = (idp as IdentityProvider).id
-		}
-		else {
-			idp_id = (idp as Auth0Identity).provider;
-		}
-
-		return `https://s3-us-west-2.amazonaws.com/com.4th-a.resources/socialmediaicons/signin/${idp_id}.png`;
-	}
 
 	private fetchIdentityProviders = ()=> {
 
@@ -603,6 +580,17 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 					searchResultsIndex: searchQueryIndex
 				};
 				return updated;
+
+			}, ()=> {
+	
+			//	const sr = this.state.searchResults;
+			//	if (sr) 
+			//	{
+			//		const q = sr.query;
+			//		log.debug("Updated state: A");
+			//
+			//		this.props.history.replace(`/search?q=${q}`);
+			//	}
 			});
 		});
 	}
@@ -631,9 +619,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				points     : 0
 			};
 
-			const displayName = this.displayNameForIdentity(searchResult, identity).toLowerCase();
+			const displayName = util.displayNameForIdentity(identity, searchResult.s4).toLowerCase();
 
-			const imgUrl = this.imageUrlForIdentity(searchResult, identity);
+			const imgUrl = util.imageUrlForIdentity(identity, searchResult.s4);
 			if (imgUrl != null) {
 				matchInfo.points++;
 			}
@@ -766,96 +754,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		}
 	};
 
-	protected displayNameForIdentity = (
-		searchResult : SearchResult,
-		identity     : Auth0Identity
-	): string =>
-	{
-		let displayName: string|null = null;
-
-		switch (identity.provider)
-		{
-			case "auth0":
-			case "evernote":
-			case "evernote-sandbox": {
-				// Auth0 database connections use the term 'username'.
-				// Evernote uses the term 'username'
-				displayName = identity.profileData.username;
-				break;
-			}
-			case "wordpress": {
-				// wordpress uses the term 'display_name'
-				displayName = identity.profileData.display_name;
-				break;
-			}
-			default: {
-				displayName = identity.profileData.name;
-				break;
-			}
-		}
-		
-		if (!_.isString(displayName)) {
-			displayName = searchResult.s4.user_id;
-		}
-
-		return displayName;
-	}
-
-	protected imageUrlForIdentity = (
-		searchResult : SearchResult,
-		identity     : Auth0Identity
-	): string|null =>
-	{
-		let url: string|null = null;
-
-		if (identity.provider == "auth0")
-		{
-			const region = searchResult.s4.region;
-			const bucket = searchResult.s4.bucket;
-
-			const components = identity.user_id.split('|');
-			const auth0_id = components[components.length - 1];
-
-			// Example:
-			// https://s3-us-west-2.amazonaws.com/com.4th-a.user.jag15iacxneuco7owmegke63msbgyuyx-35e540bc/avatar/5a983d0232a70c286d7c1931
-
-			url = `https://s3-${region}.amazonaws.com/${bucket}/avatar/${auth0_id}`;
-		}
-		else
-		{
-			const profileData = identity.profileData || {};
-			const picUrl = profileData.picture;
-
-			if (_.isString(picUrl))
-			{
-				url = picUrl;
-
-				let test: URL|null = null;
-				try {
-					test = new URL(url);
-				} catch(e){}
-
-				if (test && test.host.includes("gravatar.com"))
-				{
-					if (url.includes("cdn.auth0.com/avatars"))
-					{
-						// Filter out the default auth0 picture.
-						// We can use our own SVG generated icon.
-
-						url = null;
-					}
-				}
-
-				if (url && identity.provider == "bitbucket")
-				{
-					url = url.replace("/32/", "/128/");
-				}
-			}
-		}
-
-		return url;
-	}
-
 	protected searchResultsTable_changePage = (
 		event: React.MouseEvent<HTMLButtonElement>,
 		page: number
@@ -961,7 +859,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 								onClick={this.idpMenuItemSelected.bind(this, index)}
 							>
 								<ListItemIcon>
-							 		<img src={this.imageUrlForIdentityProvider_64(idp)} width="32" height="32" />
+							 		<img src={util.imageUrlForIdentityProvider_64(idp)} width="32" height="32" />
 								</ListItemIcon>
 								<ListItemText
 									classes={{ primary: classes.primary }}
@@ -1005,23 +903,23 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 							const identity = identities[displayIdx];
 							const match = matches[displayIdx];
 							
-							const displayName = this.displayNameForIdentity(searchResult, identity);
+							const displayName = util.displayNameForIdentity(identity, searchResult.s4);
 
-							const idpUrl = this.imageUrlForIdentityProvier_signin(identity);
-							const avatarUrl = this.imageUrlForIdentity(searchResult, identity);
+							const idpUrl = util.imageUrlForIdentityProvider_signin(identity);
+							const avatarUrl = util.imageUrlForIdentity(identity, searchResult.s4);
 
 							const avatarSection = (
 								<Avatar className={classes.avatar}>
 									<ReactImageFallback
 										src={avatarUrl || undefined}
 										initialImage={
-											<AccountCircleIcon className={classes.avatar} color="primary"/>
+											<AccountCircleIcon className={classes.avatarImg} color="primary"/>
 										}
 										fallbackImage={
-											<AccountCircleIcon className={classes.avatar} color="primary"/>
+											<AccountCircleIcon className={classes.avatarImg} color="primary"/>
 										}
-										width={64}
-										height={64}
+										width={AVATAR_SIZE}
+										height={AVATAR_SIZE}
 									/>
 								</Avatar>
 								
@@ -1117,7 +1015,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 											</div>
 											<div className={classes.tableRow_nameAndProvider}>
 												<Typography variant="headline">{displayNameSection}</Typography>
-												<img src={idpUrl} height="22" className={classes.signInImg}/>
+												<img src={idpUrl} height="22" className={classes.identityProviderImg}/>
 											</div>
 										</div>
 									</TableCell>
@@ -1165,9 +1063,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						>
 						{searchResult.auth0.identities.map((identity, identityIdx)=> {
 
-							const idpUrl = this.imageUrlForIdentityProvider_64(identity);
-							const idUrl = this.imageUrlForIdentity(searchResult, identity);
-							const displayName = this.displayNameForIdentity(searchResult, identity);
+							const idpUrl = util.imageUrlForIdentityProvider_64(identity);
+							const idUrl = util.imageUrlForIdentity(identity, searchResult.s4);
+							const displayName = util.displayNameForIdentity(identity, searchResult.s4);
 							
 							const onClick = this.userIdentsMenuItemSelected.bind(this, identityIdx);
 
