@@ -4,10 +4,12 @@ import * as _ from 'lodash';
 import {Redirect, Route, Switch, withRouter} from 'react-router-dom';
 import {RouteComponentProps} from 'react-router';
 
+import * as util from '../util/Util';
+
 import SearchPage from './Search';
 import SendPage from './Send';
 
-import {Logger} from '../util/logging'
+import {Logger} from '../util/Logging';
 
 // Material UI
 
@@ -37,15 +39,6 @@ interface IMainState {
 
 class Main extends React.Component<IMainProps, IMainState> {
 
-	/**
-	 * Must be a 32 character zBase32 encoded string.
-	**/
-	protected isValidUserID(str: string): boolean
-	{
-		const regex = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{32}$/;
-		return regex.test(str);
-	}
-
 	public render(): React.ReactNode
 	{
 		const state = this.state;
@@ -58,10 +51,10 @@ class Main extends React.Component<IMainProps, IMainState> {
 		
 		log.debug("pathname: "+ pathname);
 
-		if (this.isValidUserID(pathname))
+		if (util.is_valid_user_id(pathname))
 		{
 			return (
-				<SendPage/>
+				<SendPage user_id={pathname} />
 			);
 		}
 		else

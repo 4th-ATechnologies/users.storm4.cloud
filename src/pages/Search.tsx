@@ -1,12 +1,19 @@
 import * as React from 'react';
 import * as _ from 'lodash';
+
 import ReactImageFallback from 'react-image-fallback';
-import {isObject, isArray, isString}  from 'lodash';
+
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 
-import * as apigateway from '../util/apigateway';
-import {Logger} from '../util/logging'
+import * as api_gateway from '../util/APIGateway';
+import {Logger} from '../util/Logging'
+
+import {
+	UserInfo,
+	Auth0Identity,
+	Auth0Profile
+} from '../models/users'
 
 // Material UI
 
@@ -117,7 +124,10 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		justifyContent: 'center',
 		alignItems: 'flex-start',
 		alignContent: 'flex-start',
-		marginLeft: 16
+		marginLeft: theme.spacing.unit * 2, // from avatar
+		marginRight: 0,
+		marginTop: 4,
+		marginBottom: 4
 	},
 	tableRow_containerButtons: {
 		display: 'flex',
@@ -126,10 +136,10 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		justifyContent: 'flex-end',
 		alignItems: 'center',
 		alignContent: 'center',
-		marginLeft: theme.spacing.unit,
+		marginLeft: 0, // see: tableRow_containerIdentity.marginLeft
 		marginRight: theme.spacing.unit,
-		marginTop: 4,
-		marginBottom: 4
+		marginTop: 2,
+		marginBottom: 2
 	},
 	signInImg: {
 		backgroundColor: 'rgb(255,255,255)',
@@ -164,29 +174,17 @@ interface IdentityProvider {
 	eTag_signin : string
 }
 
-interface Auth0Identity {
-	user_id     : string,
-	provider    : string,
-	connection  : string,
-	profileData : any
+interface Auth0Profile_SearchResult extends Auth0Profile {
+	/* 
+		...Auth0Profile
+	*/
+	matches    : SearchMatchInfo[], // added during post-processing
+	displayIdx : number             // added during post-processing
 }
 
 interface SearchResult {
-	s4 : {
-		user_id : string,
-		bucket  : string,
-		region  : string
-	},
-	auth0: {
-		updated_at : string,
-		user_metadata : {
-			preferedAuth0ID  ?: string,
-			preferredAuth0ID ?: string
-		},
-		identities : Auth0Identity[],
-		matches    : SearchMatchInfo[], // added during post-processing
-		displayIdx : number             // added during post-processing
-	}
+	s4    : UserInfo,
+	auth0 : Auth0Profile_SearchResult
 }
 
 interface SearchResults {
@@ -249,6 +247,7 @@ interface ISearchState {
 
 class Search extends React.Component<ISearchProps, ISearchState> {
 
+	private lastSearchTextFieldClick: number = 0;
 	private lastTableButtonClick: number = 0;
 
 	public state: ISearchState = {
@@ -315,12 +314,12 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			};
 
 			let idp: IdentityProvider[]|null = null;
-			if (isObject(json) && isArray(json.identityProviders))
+			if (_.isObject(json) && _.isArray(json.identityProviders))
 			{
 				let isValid = true;
 				for (const obj of json.identityProviders)
 				{
-					if (!isString(obj.id) || !isString(obj.displayName)) {
+					if (!_.isString(obj.id) || !_.isString(obj.displayName)) {
 						isValid = false;
 					}
 				}
@@ -453,10 +452,18 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const newValue = event.target.value;
 		log.debug("searchTextFieldChanged() => "+ newValue);
 
+		const now = Date.now();
+		const diff = now - this.lastSearchTextFieldClick;
+		const clearButtonClickDetected = (diff < 20);
+
 		this.setState({
 			searchTextFieldStr: newValue
+		}, ()=> {
+
+			if (clearButtonClickDetected) {
+				this.submitSearch();
+			}
 		});
-	//	this.submitSearch();
 	}
 
 	protected searchTextFieldKeyPress = (
@@ -475,22 +482,36 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 	): void =>
 	{
 		log.debug("searchTextFieldKeyPress().type =>"+ event.type);
+
+		// This method gets called for ANY click on the textField.
+		// What we're trying to do is detect when the user clicks the x/clear button.
+		// The events we do get:
+		// 1. onClick
+		// 2. onChange
+		// 
+		// So if these two methods get called back-to-back,
+		// then we can detect when the user clears the textField.
+
+		this.lastSearchTextFieldClick = Date.now();
 	}
 
-	protected submitSearch = (page ?: number)=> {
+	protected submitSearch = (
+		page ?: number
+	): void =>
+	{
 		log.debug("submitSearch(): "+ this.state.searchTextFieldStr);
 
 		page = page || 0;
 
 		const state = this.state;
+
+		const search_query = state.searchTextFieldStr.trim();
 		const searchQueryIndex = state.searchQueryIndex + 1;
 
 		let search_provider: string = "*"
 		if (state.idpMenuSelectedIndex >= 0) {
 			search_provider = state.identityProviders[state.idpMenuSelectedIndex].id;
 		}
-
-		const search_query = state.searchTextFieldStr.trim();
 
 		const emptySearchResults: SearchResults = {
 			provider : search_provider,
@@ -511,8 +532,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			return;
 		}
 
-		const host = apigateway.getHost();
-		const path = apigateway.getPath("/auth0/search");
+		const host = api_gateway.getHost();
+		const path = api_gateway.getPath("/auth0/search");
 
 		const body = {
 			provider : search_provider,
@@ -999,7 +1020,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 										fallbackImage={
 											<AccountCircleIcon className={classes.avatar} color="primary"/>
 										}
-										width={64} height={64} />
+										width={64}
+										height={64}
+									/>
 								</Avatar>
 								
 							);
@@ -1133,9 +1156,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				{searchResults.results.map((searchResult, searchResultIdx) => {
 
 					const user_id = searchResult.s4.user_id;
-
-					log.debug(`userIdentsMenuOpen(${state.userIdentsMenuOpen}) ?== user_id(${user_id})`);
-
 					return (
 						<Menu
 							key={user_id}

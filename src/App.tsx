@@ -44,14 +44,20 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	center: {
 		display: 'flex',
 		flexGrow: 1,
-		margin: 0,
-		padding: 0,
 		maxWidth: '900px',
+		marginTop: theme.spacing.unit * 2,
+		marginBottom: 0,
+		marginLeft: 0,
+		marginRight: 0,
 	},
 	footer: {
 		display: 'flex',
 		flexGrow: 1,
-		padding: theme.spacing.unit * 3,
+		marginTop: theme.spacing.unit * 3,
+		marginBottom: 0,
+		marginLeft: 0,
+		marginRight: 0,
+		padding: 0
 	},
 	headerContent: {
 		display: 'flex',
@@ -62,9 +68,6 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		minWidth: '100%',
 		margin: 0,
 		padding: 0,
-	},
-	centerContent: {
-		display: 'inline'
 	},
 	toolbar: theme.mixins.toolbar,
 	logoImage: {

@@ -8,6 +8,7 @@
 		]
 	},
 	"rules": {
+		"class-name": false,
 		"object-literal-sort-keys": false,
 		"comment-format": false,
 		"ordered-imports": false,
