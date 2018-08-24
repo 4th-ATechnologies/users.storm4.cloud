@@ -125,11 +125,23 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	section_expansionPanel_summary_text: {
 		marginLeft: theme.spacing.unit * 2
 	},
+	section_expansionPanel_details: {
+	},
 	span_underline: {
 		textDecoration: 'underline'
 	},
 	a_noLinkColor: {
 		color: 'inherit'
+	},
+	indented: {
+		marginLeft: theme.spacing.unit * 2
+	},
+	wrap: {
+		wordWrap: 'break-word',
+		wordBreak: 'break-all'
+	},
+	gray: {
+		color: theme.palette.text.secondary
 	}
 });
 
@@ -151,7 +163,12 @@ interface ISendState {
 	// 
 	is_fetching_public_key : boolean,
 	public_key             : PubKey|null,
-	public_key_err_msg     : string|null
+	public_key_err_msg     : string|null,
+
+	// Blockchain info
+	//
+	is_fetching_blockchain_info : boolean,
+	blockchain_info             : any|null
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -164,7 +181,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		is_fetching_public_key    : false,
 		public_key                : null,
-		public_key_err_msg        : null
+		public_key_err_msg        : null,
+
+		is_fetching_blockchain_info : false,
+		blockchain_info             : null
 	}
 
 	protected getIdentityIdx = (): number => {
@@ -384,6 +404,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const user_id = this.props.user_id;
 		const user_profile = state.user_profile;
+		const pub_key = state.public_key;
 
 		let displayName = user_id;
 		if (user_profile)
@@ -399,17 +420,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 		let pubKeyUrl: string|null = null;
 		if (user_profile) {
 			pubKeyUrl = util.pubKeyUrlForUser(user_profile.s4);
-		}
-
-		let section_li_pubKey;
-		if (pubKeyUrl) {
-			section_li_pubKey = (
-				<li>
-					<Typography>
-						The user's public key is <a href={pubKeyUrl} className={classes.a_noLinkColor}>here</a>.
-					</Typography>
-				</li>
-			)
 		}
 
 		let section_summary: React.ReactNode;
@@ -450,29 +460,99 @@ class Send extends React.Component<ISendProps, ISendState> {
 			);
 		}
 
+		let section_li_pubKey;
+		if (pubKeyUrl) {
+			section_li_pubKey = (
+				<li>
+					The user's public key is <a href={pubKeyUrl} className={classes.a_noLinkColor}>here</a>.
+				</li>
+			)
+		}
+
+		let section_pubKeyDetails: React.ReactFragment|null = null;
+		if (pub_key)
+		{
+			section_pubKeyDetails = (
+				<React.Fragment>
+					<Typography paragraph={true}>
+						Public Key Details
+					</Typography>
+					<Typography component="ul" paragraph={true}>
+						<li>Type: ECC {pub_key.keySuite}</li>
+						<li className={classes.wrap}>Value <span className={classes.gray}>(Base64)</span>: {pub_key.pubKey}</li>
+					</Typography>
+				</React.Fragment>
+			);
+		}
+
 		const section_details = (
-			<div>
-				<Typography>
-					<p>
-						Every Storm4 user has a public/private key pair.
-						The private key is known <span className={classes.span_underline}>ONLY</span> to
-						the user. (The server does not know it.)
-					</p>
-					<p>
-						We're going to use the public key when encrypting the file. 
-						This ensures that only "{displayName}" can decrypt it.
-						The file is encrypted in your browser, and then the encrypted
-						version is uploaded to the cloud.
-					</p>
+			<div className={classes.section_expansionPanel_details}>
+				<Typography paragraph={true}>
+					Every Storm4 user has a public/private key pair.
+					The private key is known <span className={classes.span_underline}>ONLY</span> to
+					the user. (The server does not know it.)
 				</Typography>
-				<ul>
+				<Typography paragraph={true}>
+					We're going to use the public key when encrypting the file. 
+					This ensures that only "{displayName}" can decrypt it.
+					The file is encrypted in your browser, and then the encrypted
+					version is uploaded to the cloud.
+				</Typography>
+				<Typography component="ul" paragraph={true}>
 					<li>
-						<Typography>
-							The user's public profile is <a href={profileUrl} className={classes.a_noLinkColor}>here</a>.
-						</Typography>
+						The user's public profile is <a href={profileUrl} className={classes.a_noLinkColor}>here</a>.
 					</li>
 					{section_li_pubKey}
-				</ul>
+				</Typography>
+				<Typography paragraph={true}>
+					Crypto Details:
+				</Typography>
+				<Typography paragraph={true} className={classes.indented}>
+					A random 512-bit key is generated within the browser,
+					and is then used to encrypt the file
+					using <a href="https://en.wikipedia.org/wiki/Threefish" className={classes.a_noLinkColor}>Threefish</a>.
+					The file's encryption key is then encrypted to the user's public key,
+					and then both blobs (the encrypted file & the encrypted key) are
+					uploaded to the cloud.
+				</Typography>
+				{section_pubKeyDetails}
+			</div>
+		);
+
+		return (
+			<ExpansionPanel>
+				<ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
+					{section_summary}
+				</ExpansionPanelSummary>
+				<ExpansionPanelDetails>
+					{section_details}
+				</ExpansionPanelDetails>
+			</ExpansionPanel>
+		);
+	}
+
+	public renderExpansionPanel2(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		const user_id = this.props.user_id;
+		const user_profile = state.user_profile;
+
+		let section_summary: React.ReactNode;
+		section_summary = (
+			<div className={classes.section_expansionPanel_summary}>
+				<CircularProgress
+					color="secondary"
+					size={16}
+				/>
+				<Typography className={classes.section_expansionPanel_summary_text}>
+					{"Fetching blockchain verification..."}
+				</Typography>
+			</div>
+		);
+
+		const section_details = (
+			<div className={classes.section_expansionPanel_details}>
 			</div>
 		);
 
@@ -505,12 +585,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 		else
 		{
 			const section_expantionPanel1 = this.renderExpansionPanel1();
+			const section_expantionPanel2 = this.renderExpansionPanel2();
 
 			return (
 				<div className={classes.root}>
 					{section_userProfile}
 					<div className={classes.section_expansionPanels}>
 						{section_expantionPanel1}
+						{section_expantionPanel2}
 					</div>
 				</div>
 			);
