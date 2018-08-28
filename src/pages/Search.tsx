@@ -7,6 +7,7 @@ import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 
 import * as api_gateway from '../util/APIGateway';
+import * as users_cache from '../util/UsersCache';
 import * as util from '../util/Util';
 
 import {Logger} from '../util/Logging'
@@ -35,17 +36,14 @@ import Button from '@material-ui/core/Button';
 import CircularProgress from '@material-ui/core/CircularProgress';
 import Divider from '@material-ui/core/Divider';
 import IconButton from '@material-ui/core/IconButton';
-import List from '@material-ui/core/List';
-import ListItem from '@material-ui/core/ListItem';
 import ListItemIcon from '@material-ui/core/ListItemIcon';
 import ListItemText from '@material-ui/core/ListItemText';
-import MenuItem from '@material-ui/core/MenuItem';
 import Menu from '@material-ui/core/Menu';
+import MenuItem from '@material-ui/core/MenuItem';
 import Table from '@material-ui/core/Table';
 import TableBody from '@material-ui/core/TableBody';
 import TableCell from '@material-ui/core/TableCell';
 import TableFooter from '@material-ui/core/TableFooter';
-import TableHead from '@material-ui/core/TableHead';
 import TablePagination from '@material-ui/core/TablePagination';
 import TableRow from '@material-ui/core/TableRow';
 import TextField from '@material-ui/core/TextField'
@@ -163,13 +161,17 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	spanBold: {
 		fontWeight: "bold"
 	},
-	listItemIcon_avatarSmall: {
-		// The other ListItemIcon's have this marginRight value.
-		// So we add it to match.
-		marginRight: theme.spacing.unit * 2,
-
+	listItemIcon_avatar: {
 		width: 32,
 		height: 32
+	},
+	listItemIcon_avatar_img: {
+		width: 32,
+		height: 32
+	},
+	listItemText: {
+		marginLeft: 0,
+		paddingLeft: 0
 	},
 	sendIcon: {
 		width: 24,
@@ -185,7 +187,7 @@ interface Auth0Profile_SearchResult extends Auth0Profile {
 	displayIdx : number             // added during post-processing
 }
 
-interface SearchResult {
+interface SearchResult extends UserProfile {
 	s4    : UserInfo,
 	auth0 : Auth0Profile_SearchResult
 }
@@ -790,7 +792,35 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 		if (diff > 20)
 		{
-			this.props.history.push(`/id/${user_id}`);
+			let user_profile: UserProfile|null = null;
+			let identity: Auth0Identity|null = null;
+
+			const searchResults = this.state.searchResults;
+			if (searchResults)
+			{
+				for (const result of searchResults.results)
+				{
+					if (result.s4.user_id == user_id)
+					{
+						user_profile = result;
+						identity = result.auth0.identities[result.auth0.displayIdx];
+						break;
+					}
+				}
+			}
+
+			if (user_profile)
+			{
+				users_cache.addToCache(user_profile);
+			}
+			
+			let url = `/id/${user_id}`;
+			if (identity) {
+				const idh = util.idhForIdentity(identity)
+				url += `?idh=${idh}`
+			}
+
+			this.props.history.push(url);
 		}
 	}
 
@@ -862,7 +892,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 							 		<img src={util.imageUrlForIdentityProvider_64(idp)} width="32" height="32" />
 								</ListItemIcon>
 								<ListItemText
-									classes={{ primary: classes.primary }}
+									className={classes.listItemText}
 									inset={true}
 									primary={idp.displayName}
 								/>
@@ -1079,20 +1109,22 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 										 <img src={idpUrl} width="32" height="32" />
 									</ListItemIcon>
 									<ListItemIcon>
-										<ReactImageFallback
-											src={idUrl || undefined}
-											initialImage={
-												<AccountCircleIcon className={classes.listItemIcon_avatarSmall} color="primary"/>
-											}
-											fallbackImage={
-												<AccountCircleIcon className={classes.listItemIcon_avatarSmall} color="primary"/>
-											}
-											width={32}
-											height={32}
-										/>
+										<Avatar className={classes.listItemIcon_avatar}>
+											<ReactImageFallback
+												src={idUrl || undefined}
+												initialImage={
+													<AccountCircleIcon className={classes.listItemIcon_avatar_img} color="primary"/>
+												}
+												fallbackImage={
+													<AccountCircleIcon className={classes.listItemIcon_avatar_img} color="primary"/>
+												}
+												width={32}
+												height={32}
+											/>
+										</Avatar>
 									</ListItemIcon>
 									<ListItemText
-										classes={{ primary: classes.primary }}
+										className={classes.listItemText}
 										inset={true}
 										primary={displayName}
 									/>

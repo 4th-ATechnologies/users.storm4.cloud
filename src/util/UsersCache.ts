@@ -39,6 +39,8 @@ export function fetchUserProfile(
 	const cached = global_cache.get(user_id);
 	if (cached)
 	{
+		log.debug("cache hit");
+
 		const copy = _.cloneDeep(cached);
 		setImmediate(()=> {
 			callback(null, 200, copy);
@@ -53,21 +55,23 @@ export function fetchUserProfile(
 
 	}).then((response)=> {
 
+		log.debug("response.status: "+ response.status);
 		if (response.status != 200)
 		{
 			callback(null, response.status);
-			return;
+			return Promise.reject();
 		}
 		
 		return response.json();
 	
 	}).then((json)=> {
 		
-		if (_.isObject(json) &&
+		log.debug("json: "+ JSON.stringify(json, null, 2));
+
+		if (_.isObject(json)         &&
 			 _.isString(json.user_id) &&
-			 _.isString(json.bucket) &&
-			_.isString(json.region) &&
-			_.isObject(json.auth0))
+			 _.isString(json.bucket)  &&
+			_.isString(json.region)    )
 		{
 			const user_info: UserInfo = {
 				user_id : json.user_id,
@@ -94,8 +98,17 @@ export function fetchUserProfile(
 
 	}).catch((reason)=> {
 
-		log.debug(`Error fetching user_profile for ${user_id}: ${reason}`);
-
-		callback(reason);
+		if (reason == null)
+		{
+			// This is why I don't like promises...
+			// This is called when the statusCode != 200.
+			// 
+			// Yup, it's retarded.
+		}
+		else
+		{
+			log.debug(`Error fetching user_profile for ${user_id}: ${reason}`);
+			callback(reason);
+		}
 	});
 }

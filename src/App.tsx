@@ -99,7 +99,9 @@ class App extends React.Component<IAppProps, IAppState> {
 				<CssBaseline />
 				<div className={classes.header}>
 					<div className={classes.headerContent}>
-						<img src={imgLogo58} className={classes.logoImage}/>
+						<a href="/search">
+							<img src={imgLogo58} className={classes.logoImage}/>
+						</a>
 						<Typography variant="display3" color="inherit" className={classes.logoTitle}>Storm4</Typography>
 					</div>
 				</div>

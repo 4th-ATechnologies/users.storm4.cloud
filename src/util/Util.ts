@@ -1,4 +1,5 @@
 import * as _ from 'lodash';
+import * as hasha from 'hasha';
 
 import * as api_gateway from './APIGateway';
 import * as base32 from '../util/Base32Decode';
@@ -297,4 +298,38 @@ export function merkleTreeFileURL(merkle_tree_root: string): string
 	}
 
 	return `https://blockchain.storm4.cloud/${root}.json`;
+}
+
+export function findSelectedIdentity(
+	options: {
+		identities : Auth0Identity[],
+		idh        : string
+	}
+): number|null
+{
+	let result: number|null = null;
+
+	let idx = 0;
+	for (const identity of options.identities)
+	{
+		if (idhForIdentity(identity) == options.idh) {
+			result = idx;
+			break;
+		}
+		else {
+			idx++;
+		}
+	}
+
+	return result;
+}
+
+export function idhForIdentity(identity: Auth0Identity): string
+{
+	const auth0_id = `${identity.provider}|${identity.user_id}`;
+	const hash = hasha(auth0_id, {algorithm: 'sha1'});
+
+	const subhash = hash.substring(0, 8);
+
+	return subhash;
 }

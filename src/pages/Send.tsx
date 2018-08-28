@@ -1,6 +1,7 @@
 import * as React from 'react';
 import * as _ from 'lodash';
 import * as merkle_tree_gen from 'merkle-tree-gen';
+import * as queryString from 'query-string';
 
 import ReactImageFallback from 'react-image-fallback';
 
@@ -33,16 +34,25 @@ import {
 } from '@material-ui/core/styles';
 
 import Avatar from '@material-ui/core/Avatar';
+import Badge from '@material-ui/core/Badge';
 import CircularProgress from '@material-ui/core/CircularProgress';
 import ExpansionPanel from '@material-ui/core/ExpansionPanel';
 import ExpansionPanelSummary from '@material-ui/core/ExpansionPanelSummary';
 import ExpansionPanelDetails from '@material-ui/core/ExpansionPanelDetails';
+import IconButton from '@material-ui/core/IconButton';
+import ListItemIcon from '@material-ui/core/ListItemIcon';
+import ListItemText from '@material-ui/core/ListItemText';
+import Menu from '@material-ui/core/Menu';
+import MenuItem from '@material-ui/core/MenuItem';
+import Tooltip from '@material-ui/core/Tooltip';
 import Typography from '@material-ui/core/Typography';
 
 import AccountCircleIcon from '@material-ui/icons/AccountCircle';
 import CheckCircleIcon from '@material-ui/icons/CheckCircle';
-import ReportProblemIcon from '@material-ui/icons/ReportProblem';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
+import MoreVertIcon from '@material-ui/icons/MoreVert';
+import ReportProblemIcon from '@material-ui/icons/ReportProblem';
+
 
 const log = Logger.Make('debug', 'Send');
 
@@ -165,7 +175,19 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		wordBreak: 'break-all',
 		paddingLeft: 0,
 		marginLeft: 0
-	}
+	},
+	listItemIcon_avatar: {
+		width: 32,
+		height: 32
+	},
+	listItemIcon_avatar_img: {
+		width: 32,
+		height: 32
+	},
+	listItemText: {
+		marginLeft: 0,
+		paddingLeft: 0
+	},
 });
 
 interface ISendProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
@@ -204,6 +226,11 @@ interface ISendState {
 	pubkey_verifcation_success  : boolean|null,
 	pubkey_verification_err_msg : string|null,
 	pubkey_tampering_detected   : boolean|null,
+
+	// User identity menu
+	//
+	userIdentsMenuAnchor : HTMLElement|null,
+	userIdentsMenuOpen   : boolean,
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -230,6 +257,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		pubkey_verifcation_success  : null,
 		pubkey_verification_err_msg : null,
 		pubkey_tampering_detected   : null,
+
+		userIdentsMenuAnchor : null,
+		userIdentsMenuOpen   : false
 	}
 
 	protected getIdentityIdx = (): number => {
@@ -309,9 +339,24 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 			else
 			{
+				user_profile = user_profile!;
+
+				let selected_idx: number|null = null;
+
+				const qp = queryString.parse(this.props.location.search);
+				const idh = qp.idh;
+				if (idh)
+				{
+					selected_idx = util.findSelectedIdentity({
+						identities : user_profile.auth0.identities,
+						idh        : idh
+					});
+				}
+
 				this.setState({
-					is_fetching_user_profile : false,
-					user_profile             : user_profile!
+					is_fetching_user_profile  : false,
+					user_profile              : user_profile,
+					user_profile_identity_idx : selected_idx
 
 				}, ()=> {
 
@@ -423,15 +468,26 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const merkle_tree_root = util.extractMerkleTreeRoot(json);
 			log.debug("merkle_tree_root: "+ merkle_tree_root);
 
-			this.setState({
-				is_fetching_merkle_tree_root : false,
-				is_fetching_merkle_tree_file : true,
-				merkle_tree_root             : merkle_tree_root
+			if (merkle_tree_root.length == 0)
+			{
+				this.setState({
+					is_fetching_merkle_tree_root : false,
+					merkle_tree_root             : merkle_tree_root,
+					pubkey_verifcation_success   : false
+				});
+			}
+			else
+			{
+				this.setState({
+					is_fetching_merkle_tree_root : false,
+					is_fetching_merkle_tree_file : true,
+					merkle_tree_root             : merkle_tree_root
 
-			}, ()=> {
+				}, ()=> {
 
-				this.fetchMerkleTree();
-			});
+					this.fetchMerkleTree();
+				});
+			}
 
 		}).catch((reason)=> {
 
@@ -450,7 +506,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		log.debug("fetchMerkleTree()");
 
 		const merkle_tree_root = this.state.merkle_tree_root;
-		if (merkle_tree_root == null) {
+		if (merkle_tree_root == null || merkle_tree_root.length == 0) {
 			return;
 		}
 
@@ -601,7 +657,64 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	public renderUserProfile(): React.ReactNode {
+	protected userIdentsMenuButtonClicked = (
+		event   : React.MouseEvent<HTMLElement>
+	): void => {
+		log.debug("userIdentsMenuButtonClicked()");
+		
+		this.setState({
+			userIdentsMenuAnchor : event.currentTarget,
+			userIdentsMenuOpen   : true
+		});
+	}
+
+	protected userIdentsMenuItemSelected = (
+		index : number,
+		event : React.MouseEvent<HTMLElement>
+	): void =>
+	{
+		log.debug(`userIdentsMenuItemSelected(${index})`);
+
+		let idh: string|null = null;
+
+		const user_profile = this.state.user_profile;
+		if (user_profile)
+		{
+			const identities = user_profile.auth0.identities;
+			if (index >= 0 && index < identities.length)
+			{
+				const identity = identities[index];
+				idh = util.idhForIdentity(identity)
+			}
+		}
+
+		this.setState({
+			user_profile_identity_idx : index,
+			userIdentsMenuAnchor      : null,
+			userIdentsMenuOpen        : false
+
+		}, ()=> {
+
+			if (idh)
+			{
+				const user_id = user_profile!.s4.user_id;
+				const url = `/id/${user_id}?idh=${idh}`
+
+				this.props.history.replace(url);
+			}
+		});
+	}
+
+	protected userIdentsMenuClosed = ()=> {
+		log.debug("userIdentsMenuClosed()");
+
+		this.setState({
+			userIdentsMenuAnchor : null,
+			userIdentsMenuOpen   : false
+		});
+	}
+
+	public renderUserProfile(): React.ReactNode|React.ReactFragment {
 		const state = this.state;
 		const {classes} = this.props;
 
@@ -638,19 +751,34 @@ class Send extends React.Component<ISendProps, ISendState> {
 		else if (state.user_profile)
 		{
 			const user_profile = state.user_profile;
+			const identities = user_profile.auth0.identities;
 
-			const identityIdx = this.getIdentityIdx();
-			const identity = user_profile.auth0.identities[identityIdx];
+			const selected_identityIdx = this.getIdentityIdx();
+			const selected_identity = identities[selected_identityIdx];
 
-			const idpUrl = util.imageUrlForIdentityProvider_signin(identity);
-			const idUrl = util.imageUrlForIdentity(identity, user_profile.s4);
-			const displayName = util.displayNameForIdentity(identity, user_profile.s4);
+			const selected_idpUrl = util.imageUrlForIdentityProvider_signin(selected_identity);
+			const selected_idUrl = util.imageUrlForIdentity(selected_identity, user_profile.s4);
+			const selected_displayName = util.displayNameForIdentity(selected_identity, user_profile.s4);
 
-			return (
+			let section_identitiesButton: React.ReactNode|null = null;
+			if (identities.length > 1)
+			{
+				section_identitiesButton = (
+					<Tooltip title="Show all identities linked to user's account.">
+						<IconButton onClick={this.userIdentsMenuButtonClicked}>
+							<Badge badgeContent={identities.length} color="primary">
+								<MoreVertIcon />
+							</Badge>
+						</IconButton>
+					</Tooltip>
+				);
+			}
+
+			const section_identity = (
 				<div className={classes.section_identity}>
 					<Avatar className={classes.section_identity_avatar}>
 						<ReactImageFallback
-							src={idUrl || undefined}
+							src={selected_idUrl || undefined}
 							initialImage={
 								<AccountCircleIcon color="primary" className={classes.section_identity_avatar_img}/>
 							}
@@ -663,11 +791,68 @@ class Send extends React.Component<ISendProps, ISendState> {
 					</Avatar>
 					<div className={classes.section_identity_nameAndProvider}>
 						<Typography variant="headline" className={classes.section_identity_name}>
-							{displayName}
+							{selected_displayName}
 						</Typography>
-						<img src={idpUrl} height="22" className={classes.identityProviderImg}/>
+						<img src={selected_idpUrl} height="22" className={classes.identityProviderImg}/>
 					</div>
+					{section_identitiesButton}
 				</div>
+			);
+
+			const section_menu = (
+				<Menu
+					anchorEl={state.userIdentsMenuAnchor}
+					open={state.userIdentsMenuOpen}
+					onClose={this.userIdentsMenuClosed}
+				>
+				{identities.map((identity, index) => {
+
+					const idpUrl = util.imageUrlForIdentityProvider_64(identity);
+					const idUrl = util.imageUrlForIdentity(identity, user_profile.s4);
+					const displayName = util.displayNameForIdentity(identity, user_profile.s4);
+
+					const onClick = this.userIdentsMenuItemSelected.bind(this, index);
+
+					return (
+						<MenuItem
+							key={`${identity.user_id}`}
+							selected={selected_identityIdx == index}
+							onClick={onClick}
+						>
+							<ListItemIcon>
+								 <img src={idpUrl} width="32" height="32" />
+							</ListItemIcon>
+							<ListItemIcon>
+								<Avatar className={classes.listItemIcon_avatar}>
+									<ReactImageFallback
+										src={idUrl || undefined}
+										initialImage={
+											<AccountCircleIcon className={classes.listItemIcon_avatar_img} color="primary"/>
+										}
+										fallbackImage={
+											<AccountCircleIcon className={classes.listItemIcon_avatar_img} color="primary"/>
+										}
+										width={32}
+										height={32}
+									/>
+								</Avatar>
+							</ListItemIcon>
+							<ListItemText
+								className={classes.listItemText}
+								inset={true}
+								primary={displayName}
+							/>
+						</MenuItem>
+					);
+				})}
+				</Menu>
+			);
+
+			return (
+				<React.Fragment>
+					{section_identity}
+					{section_menu}
+				</React.Fragment>
 			);
 		}
 		else
@@ -850,7 +1035,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</div>
 			);
 		}
-		else if (merkle_tree_root)
+		else if (merkle_tree_root != null)
 		{
 			if (merkle_tree_root.length == 0)
 			{
@@ -1099,6 +1284,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	public componentDidMount() {
 		log.debug("componentDidMount()");
+
+		log.debug("query parameters: "+ this.props.location.search);
 
 		this.fetchUserProfile();
 	}
