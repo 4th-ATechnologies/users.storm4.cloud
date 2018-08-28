@@ -1,12 +1,25 @@
 import * as _ from 'lodash';
 
 import * as api_gateway from './APIGateway';
+import * as base32 from '../util/Base32Decode';
+
+import {Logger} from '../util/Logging'
 
 import {
 	IdentityProvider,
 	UserInfo,
 	Auth0Identity
-} from '../models/users'
+} from '../models/models'
+
+const log = Logger.Make('debug', 'Util');
+
+
+export function buffer2Hex(
+	buffer: ArrayBuffer
+): string
+{
+	return Array.prototype.map.call(new Uint8Array(buffer), (x: number)=> ('00' + x.toString(16)).slice(-2)).join('');
+}
 
 /**
  * Must be a 32 character zBase32 encoded string.
@@ -17,12 +30,22 @@ export function isValidUserID(str: string): boolean
 	return regex.test(str);
 }
 
+export function userID2Hex(user_id: string): string
+{
+	if (!isValidUserID(user_id)) {
+		return '';
+	}
+
+	const user_id_bytes = base32.base32Decode(user_id, 'zBase32');
+	return buffer2Hex(user_id_bytes);
+}
+
 export function profileUrlForUser(user_id: string): string
 {
 	const host = api_gateway.getHost();
-	const path = api_gateway.getPath('/users/info');
+	const path = api_gateway.getPath(`/users/info/${user_id}`);
 
-	return `https://${host}${path}?user_id=${user_id}&identities=1`;
+	return `https://${host}${path}?identities=1`;
 }
 
 export function pubKeyUrlForUser(user_info: UserInfo): string
@@ -177,4 +200,101 @@ export function displayNameForIdentity(
 	}
 
 	return displayName;
+}
+
+export function rpcURL(): string
+{
+	const accessToken = '94cbbe9f44574c19af2335390473a778';
+	return `https://mainnet.infura.io/${accessToken}`;
+}
+
+export function rpcJSON(user_id: string): any
+{
+	return {
+		jsonrpc : "2.0",
+		method  : "eth_call",
+		id      : 1,
+		params  : [
+			{
+				to   : "0xF8CadBCaDBeaC3B5192ba29DF5007746054102a4",
+				data : transactionData(user_id)
+			},
+			"latest"
+		]
+	}
+}
+
+export function transactionData(user_id: string): string
+{
+	// Data Layout:
+	//
+	// - First 4 bytes : Function signature
+	// - Next 32 bytes : bytes20 (aligned left) : userID
+	// - Next 32 bytes : uint8   (aligned left) : hashTypeID
+
+	let result = "0x4326e22b";
+
+	let userID_hex = userID2Hex(user_id);
+	if (userID_hex.startsWith('0x') || userID_hex.startsWith('0X')) {
+		userID_hex = userID_hex.substring(2);
+	}
+
+	result += userID_hex;
+	result += "0000000000000000000000000000000000000000000000000000000000000000";
+	//         1234567890123456789012345678901234567890123456789012345678901234
+	//                 10        20        30        40        50        64  64
+
+	return result;
+}
+
+export function extractMerkleTreeRoot(response: any): string
+{
+	if (!_.isObject(response)) {
+		log.debug('extractMerkleTreeRoot(): not an object');
+		return '';
+	}
+
+	let encoded = response.result;
+	if (!_.isString(encoded)) {
+		log.debug('extractMerkleTreeRoot(): response.result not a string');
+		return '';
+	}
+
+	if (encoded.startsWith('0x') || encoded.startsWith('0X')) {
+		encoded = encoded.substring(2);
+	}
+
+	// The response value is of type `bytes`,
+	// which is a dynamically sized element.
+	//
+	// Data Layout:
+	// - 32 bytes : Offset (of where dynamic value is stored)
+	// - 32 bytes : Length of `bytes`
+	// -  X bytes : Actual value
+	//
+	// This looks goofy and wasteful when there's only a single value,
+	// but makes a little more sense when there's several parameter values being passed.
+	// 
+	// In our case, we passed hashTypeID==0, which is SHA256.
+	// So we know the response will be: 256 bits => 32 bytes.
+	// 
+	// Remember: 1 byte => 2 hex characters
+
+	if (encoded.length != (64+64+64)) {
+		log.debug('extractMerkleTreeRoot(): response.result.length = '+ encoded.length);
+		return '';
+	}
+	else {
+		return encoded.substring(64+64);
+	}
+}
+
+export function merkleTreeFileURL(merkle_tree_root: string): string
+{
+	let root = merkle_tree_root;
+	if (root.startsWith('0x') || root.startsWith('0X')) {
+		root = root.substring(2);
+	}
+
+	return `https://blockchain.storm4.cloud/${root}.json`;
 }

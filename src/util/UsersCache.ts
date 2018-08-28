@@ -10,7 +10,7 @@ import {
 	UserInfo,
 	Auth0Profile,
 	UserProfile
-} from '../models/users'
+} from '../models/models'
 
 const log = Logger.Make('debug', 'UsersCache');
 

@@ -16,8 +16,10 @@ import {
 	Auth0Identity,
 	Auth0Profile,
 	UserProfile,
-	PubKey
-} from '../models/users'
+	PubKey,
+	MerkleTreeInfo,
+	MerkleTreeValue,
+} from '../models/models'
 
 // Material UI
 
@@ -44,6 +46,8 @@ import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 const log = Logger.Make('debug', 'Send');
 
 const AVATAR_SIZE = 96;
+
+const HASH_TYPE_ID = "0"; // result for hashTypeID("sha256")
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
@@ -142,6 +146,24 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	},
 	gray: {
 		color: theme.palette.text.secondary
+	},
+	blockquote: {
+		marginLeft  : theme.spacing.unit * 2,
+		fontFamily  : 'Consolas, "Times New Roman", Verdana',
+		borderLeft  : '2px solid #CCC',
+		paddingLeft : '8px'
+	},
+	sub_ul: {
+		wordWrap: 'break-word',
+		wordBreak: 'break-all',
+		marginLeft: theme.spacing.unit * 2,
+		paddingLeft: 0,
+	},
+	sub_ul_li: {
+		wordWrap: 'break-word',
+		wordBreak: 'break-all',
+		paddingLeft: 0,
+		marginLeft: 0
 	}
 });
 
@@ -167,8 +189,13 @@ interface ISendState {
 
 	// Blockchain info
 	//
-	is_fetching_blockchain_info : boolean,
-	blockchain_info             : any|null
+	is_fetching_merkle_tree_root : boolean,
+	merkle_tree_root             : string|null,
+	merkle_tree_root_err_msg     : string|null
+
+	is_fetching_merkle_tree     : boolean,
+	merkle_tree                 : any|null,
+	merkle_tree_err_msg         : string|null
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -179,12 +206,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 		user_profile_identity_idx : null,
 		user_profile_err_msg      : null,
 
-		is_fetching_public_key    : false,
-		public_key                : null,
-		public_key_err_msg        : null,
+		is_fetching_public_key : false,
+		public_key             : null,
+		public_key_err_msg     : null,
 
-		is_fetching_blockchain_info : false,
-		blockchain_info             : null
+		is_fetching_merkle_tree_root : false,
+		merkle_tree_root             : null,
+		merkle_tree_root_err_msg     : null,
+
+		is_fetching_merkle_tree : false,
+		merkle_tree             : null,
+		merkle_tree_err_msg     : null
 	}
 
 	protected getIdentityIdx = (): number => {
@@ -267,6 +299,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}, ()=> {
 
 					this.fetchPublicKey();
+					this.fetchBlockchainInfo();
 				});
 			}
 		});
@@ -279,6 +312,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		if (user_profile == null) {
 			return;
 		}
+
+		this.setState({
+			is_fetching_public_key : true
+		});
 
 		const url = util.pubKeyUrlForUser(user_profile.s4);
 
@@ -317,7 +354,122 @@ class Send extends React.Component<ISendProps, ISendState> {
 				is_fetching_public_key : false,
 				public_key_err_msg     : "User's public key not found! Check internet connection."
 			});
+		});
+	}
+
+	public fetchBlockchainInfo = (): void => {
+		log.debug("fetchBlockchainInfo()");
+
+		const user_profile = this.state.user_profile;
+		if (user_profile == null) {
 			return;
+		}
+
+		this.setState({
+			is_fetching_merkle_tree_root : true
+		});
+
+		const url = util.rpcURL();
+		const body_obj = util.rpcJSON(user_profile.s4.user_id);
+
+		log.debug(`POST: ${url}: ${JSON.stringify(body_obj, null, 2)}`);
+
+		fetch(url, {
+			method : 'POST',
+			body   : JSON.stringify(body_obj, null, 0)
+
+		}).then((response)=> {
+
+			if (response.status != 200)
+			{
+				log.err("Error fetching blockchainInfo: "+ response.status);
+
+				this.setState({
+					is_fetching_merkle_tree_root : false,
+					merkle_tree_root_err_msg     : "Could not fetch blockchain info. Ethereum node is having technical difficulties?."
+				});
+				return;
+			}
+
+			return response.json();
+
+		}).then((json)=> {
+
+			log.debug("RPC JSON response: "+ JSON.stringify(json, null, 2));
+
+			const merkle_tree_root = util.extractMerkleTreeRoot(json);
+			log.debug("merkle_tree_root: "+ merkle_tree_root);
+
+			this.setState({
+				is_fetching_merkle_tree_root : false,
+				is_fetching_merkle_tree      : true,
+				merkle_tree_root             : merkle_tree_root
+
+			}, ()=> {
+
+				this.fetchMerkleTree();
+			});
+
+		}).catch((reason)=> {
+
+			log.err("Error fetching blockchainInfo: "+ reason);
+
+			this.setState({
+				is_fetching_merkle_tree_root : false,
+				merkle_tree_root_err_msg     : "Could not fetch blockchain info! Check internet connection."
+			});
+		});
+	}
+
+	public fetchMerkleTree = (): void => {
+		log.debug("fetchMerkleTree()");
+
+		const merkle_tree_root = this.state.merkle_tree_root;
+		if (merkle_tree_root == null) {
+			return;
+		}
+
+		this.setState({
+			is_fetching_merkle_tree : true
+		});
+
+		const url = util.merkleTreeFileURL(merkle_tree_root);
+
+		fetch(url, {
+			method: 'GET'
+
+		}).then((response)=> {
+
+			if (response.status != 200)
+			{
+				log.err("Error fetching merkle tree: "+ response.status);
+
+				this.setState({
+					is_fetching_merkle_tree : false,
+					merkle_tree_err_msg     : "Could not fetch merkle tree. We may be experiencing technical difficulties."
+				});
+				return;
+			}
+
+			return response.json();
+
+		}).then((json)=> {
+
+			log.debug("merkleTree JSON: "+ JSON.stringify(json, null, 2));
+
+			this.setState({
+				is_fetching_merkle_tree : false,
+				merkle_tree             : json
+			});
+
+		}).catch((reason)=> {
+
+			log.err("Error fetching merkleTree: "+ reason);
+
+			this.setState({
+				is_fetching_merkle_tree : false,
+				merkle_tree_err_msg     : "Could not fetch merkle tree! Check internet connection."
+			});
 		});
 	}
 
@@ -538,21 +690,156 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const user_id = this.props.user_id;
 		const user_profile = state.user_profile;
 
+		const user_id_hex = util.userID2Hex(user_id);
+
+		const merkle_tree_root = state.merkle_tree_root;
+
 		let section_summary: React.ReactNode;
-		section_summary = (
-			<div className={classes.section_expansionPanel_summary}>
-				<CircularProgress
-					color="secondary"
-					size={16}
-				/>
-				<Typography className={classes.section_expansionPanel_summary_text}>
-					{"Fetching blockchain verification..."}
-				</Typography>
-			</div>
-		);
+		if (state.is_fetching_merkle_tree_root)
+		{
+			section_summary = (
+				<div className={classes.section_expansionPanel_summary}>
+					<CircularProgress
+						color="secondary"
+						size={16}
+					/>
+					<Typography className={classes.section_expansionPanel_summary_text}>
+						{this.state.is_fetching_merkle_tree_root ?
+						  "Fetching blockchain verification (1 of 2)..." :
+						  "Fetching blockchain verification (2 of 2)..."
+						}
+					</Typography>
+				</div>
+			);
+		}
+		else if (state.merkle_tree_root_err_msg)
+		{
+			section_summary = (
+				<div className={classes.section_expansionPanel_summary}>
+					<ReportProblemIcon color="error"/>
+					<Typography className={classes.section_expansionPanel_summary_text}>
+						{state.merkle_tree_root_err_msg || "Generic error message"}
+					</Typography>
+				</div>
+			);
+		}
+		else if (merkle_tree_root)
+		{
+			if (merkle_tree_root.length == 0)
+			{
+				section_summary = (
+					<div className={classes.section_expansionPanel_summary}>
+						<ReportProblemIcon nativeColor="yellow"/>
+						<Typography className={classes.section_expansionPanel_summary_text}>
+							{"Public key not posted to blockchain yet"}
+						</Typography>
+					</div>
+				);
+			}
+			else
+			{
+				section_summary = (
+					<div className={classes.section_expansionPanel_summary}>
+						<CheckCircleIcon nativeColor='green' />
+						<Typography className={classes.section_expansionPanel_summary_text}>
+							{"Fetched blockchain information"}
+						</Typography>
+					</div>
+				);
+			}
+		}
+		else
+		{
+			section_summary = (
+				<div className={classes.section_expansionPanel_summary}>
+					<CircularProgress
+						color="secondary"
+						size={16}
+					/>
+					<Typography className={classes.section_expansionPanel_summary_text}>
+						{"Initializing..."}
+					</Typography>
+				</div>
+			);
+		}
+
+		const rpc_data = JSON.stringify(util.rpcJSON(user_id), null, 0);
+		const rpc_url = util.rpcURL();
+		const rpc_call =
+			`curl -X POST -H "Content-Type: application/json" -d '${rpc_data}' ${rpc_url}`;
+
+		let contract_response: string;
+		let merkle_tree_url: string;
+		if (merkle_tree_root == null) {
+			contract_response = "fetching...";
+			merkle_tree_url   = "fetching...";
+		}
+		else if (merkle_tree_root.length == 0) {
+			contract_response = "not available (user not on blockchain yet)";
+			merkle_tree_url   = "not available (user not on blockchain yet)";
+		}
+		else {
+			contract_response = merkle_tree_root;
+			merkle_tree_url = util.merkleTreeFileURL(merkle_tree_root);
+		}
 
 		const section_details = (
 			<div className={classes.section_expansionPanel_details}>
+				<Typography paragraph={true}>
+					Storm4 uses the <a href="https://www.ethereum.org/" className={classes.a_noLinkColor}>Ethereum</a> blockchain
+					to independently verify the user's public key. This protects you from
+					hackers and related man-in-the-middle problems. Read more about it on
+					our <a href="https://www.storm4.cloud/blockchain.html" className={classes.a_noLinkColor}>website</a>.
+				</Typography>
+				<Typography paragraph={true} component="blockquote" className={classes.blockquote}>
+					Ethereum is a decentralized platform that runs smart contracts: applications that
+					run exactly as programmed without any possibility of downtime, censorship, fraud
+					or third party interference.
+				</Typography>
+				<Typography paragraph={true}>
+					We wrote and deployed a smart contract that allows a user's public key
+					to be stored on the blockchain. And it's written in such a way that
+					allows the public key information to be written once & only once.
+					Since the smart contract itself is immutable (due to the nature of Ethereum),
+					this creates an immutable record of the public key. Thus the keys of Storm4
+					users are immutable, verifiable, auditable & tamper-proof.
+				</Typography>
+				<Typography component="ul" paragraph={true}>
+					<li>Smart contract: <a href="https://etherscan.io/address/0xf8cadbcadbeac3b5192ba29df5007746054102a4#code" className={classes.a_noLinkColor}>deployed code</a></li>
+					<li>User ID <span className={classes.gray}>(zBase32)</span>: {user_id}</li>
+					<li>User ID <span className={classes.gray}>(hex)</span>: {user_id_hex}</li>
+					<li>
+						RPC Call:
+						<ul className={classes.sub_ul}>
+							<li className={classes.sub_ul_li}>
+								{rpc_call}
+							</li>
+						</ul>
+					</li>
+					<li>Contract Call:
+						<ul className={classes.sub_ul}>
+							<li className={classes.sub_ul_li}>
+								getMerkleTreeRoot({user_id_hex}, 0)
+							</li>
+							<li className={classes.sub_ul_li}>
+								<a href="https://etherscan.io/address/0xf8cadbcadbeac3b5192ba29df5007746054102a4#readContract" className={classes.a_noLinkColor} target="_blank">
+									try it yourself
+								</a>
+							</li>
+						</ul>
+					</li>
+					<li>
+						Contract Response:
+						<ul className={classes.sub_ul}>
+							<li className={classes.sub_ul_li}>
+								{contract_response}
+							</li>
+						</ul>
+					</li>
+					<li className={classes.wrap}>
+						Merkle Tree File: <a href={merkle_tree_url} className={classes.a_noLinkColor}>link</a>
+					</li>
+				</Typography>
 			</div>
 		);
 
@@ -563,6 +850,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</ExpansionPanelSummary>
 				<ExpansionPanelDetails>
 					{section_details}
+				</ExpansionPanelDetails>
+			</ExpansionPanel>
+		);
+	}
+
+	public renderExpansionPanel3(): React.ReactNode {
+
+		return (
+			<ExpansionPanel>
+				<ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
+					{"Verifying public key..."}
+				</ExpansionPanelSummary>
+				<ExpansionPanelDetails>
+					{"content goes here"}
 				</ExpansionPanelDetails>
 			</ExpansionPanel>
 		);
@@ -586,6 +887,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			const section_expantionPanel1 = this.renderExpansionPanel1();
 			const section_expantionPanel2 = this.renderExpansionPanel2();
+			const section_expantionPanel3 = this.renderExpansionPanel3();
 
 			return (
 				<div className={classes.root}>
@@ -593,6 +895,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					<div className={classes.section_expansionPanels}>
 						{section_expantionPanel1}
 						{section_expantionPanel2}
+						{section_expantionPanel3}
 					</div>
 				</div>
 			);

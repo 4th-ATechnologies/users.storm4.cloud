@@ -17,7 +17,7 @@ import {
 	Auth0Profile,
 	UserProfile,
 	IdentityProvider
-} from '../models/users'
+} from '../models/models'
 
 // Material UI
 

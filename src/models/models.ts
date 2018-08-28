@@ -55,3 +55,33 @@ export interface PubKeySignature {
 	"sig-expire"        : number,
 	"signed-properties" : string[]
 }
+
+export interface MerkleTreeNode {
+	type   : string,
+	level  : number,
+	left   : string,
+	right  : string,
+	parent : string
+}
+
+export interface MerkleTree {
+	root           : string,
+	hashalgo       : string,
+	leaves         : number,
+	levels         : number,
+//	[hash: string] : MerkleTreeNode
+}
+
+export interface MerkleTreeValue {
+	userID : string,
+	pubKey : string,
+	keyID  : string
+}
+
+export interface MerkleTreeInfo {
+	merkle : MerkleTree,
+	values : string[], // stringified MerkleTreeValue's
+	lookup : {
+		[user_id: string]: number
+	}
+}
