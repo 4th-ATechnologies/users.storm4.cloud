@@ -1,4 +1,6 @@
 
+import {MerkleTree} from 'merkle-tree-gen';
+
 export interface IdentityProvider {
 	id          : string,
 	displayName : string,
@@ -8,9 +10,10 @@ export interface IdentityProvider {
 }
 
 export interface UserInfo {
-	user_id : string,
-	bucket  : string,
-	region  : string
+	user_id  : string,
+	bucket   : string,
+	region   : string,
+	deleted ?: number
 }
 
 export interface Auth0Identity {
@@ -56,32 +59,16 @@ export interface PubKeySignature {
 	"signed-properties" : string[]
 }
 
-export interface MerkleTreeNode {
-	type   : string,
-	level  : number,
-	left   : string,
-	right  : string,
-	parent : string
-}
-
-export interface MerkleTree {
-	root           : string,
-	hashalgo       : string,
-	leaves         : number,
-	levels         : number,
-//	[hash: string] : MerkleTreeNode
-}
-
-export interface MerkleTreeValue {
+export interface MerkleTreeFileValue {
 	userID : string,
 	pubKey : string,
 	keyID  : string
 }
 
-export interface MerkleTreeInfo {
+export interface MerkleTreeFile {
 	merkle : MerkleTree,
 	values : string[], // stringified MerkleTreeValue's
 	lookup : {
-		[user_id: string]: number
+		[user_id: string]: number|undefined
 	}
 }

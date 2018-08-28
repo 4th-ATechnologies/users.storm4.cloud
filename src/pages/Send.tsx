@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as _ from 'lodash';
+import * as merkle_tree_gen from 'merkle-tree-gen';
 
 import ReactImageFallback from 'react-image-fallback';
 
@@ -17,8 +18,8 @@ import {
 	Auth0Profile,
 	UserProfile,
 	PubKey,
-	MerkleTreeInfo,
-	MerkleTreeValue,
+	MerkleTreeFile,
+	MerkleTreeFileValue,
 } from '../models/models'
 
 // Material UI
@@ -193,9 +194,16 @@ interface ISendState {
 	merkle_tree_root             : string|null,
 	merkle_tree_root_err_msg     : string|null
 
-	is_fetching_merkle_tree     : boolean,
-	merkle_tree                 : any|null,
-	merkle_tree_err_msg         : string|null
+	is_fetching_merkle_tree_file : boolean,
+	merkle_tree_file             : MerkleTreeFile|null,
+	merkle_tree_file_err_msg     : string|null,
+
+	// PubKey Verification
+	// 
+	is_verifying_public_key     : boolean,
+	pubkey_verifcation_success  : boolean|null,
+	pubkey_verification_err_msg : string|null,
+	pubkey_tampering_detected   : boolean|null,
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -214,9 +222,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 		merkle_tree_root             : null,
 		merkle_tree_root_err_msg     : null,
 
-		is_fetching_merkle_tree : false,
-		merkle_tree             : null,
-		merkle_tree_err_msg     : null
+		is_fetching_merkle_tree_file : false,
+		merkle_tree_file             : null,
+		merkle_tree_file_err_msg     : null,
+
+		is_verifying_public_key     : false,
+		pubkey_verifcation_success  : null,
+		pubkey_verification_err_msg : null,
+		pubkey_tampering_detected   : null,
 	}
 
 	protected getIdentityIdx = (): number => {
@@ -281,6 +294,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 				  ? "User not found. The userID may be incorrect, or the user may have deleted their account."
 				  : "User not found. The server may be experiencing technical difficulties."
 			}
+			else if (user_profile.s4.deleted)
+			{
+				err_msg = "User account has been deleted."
+			}
 
 			if (err_msg)
 			{
@@ -328,9 +345,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				log.err("Error fetching pubKey: "+ response.status);
 
+				const err_msg = "User's public key not found!";
 				this.setState({
-					is_fetching_public_key : false,
-					public_key_err_msg     : "User's public key not found!"
+					is_fetching_public_key     : false,
+					public_key_err_msg         : err_msg,
+					pubkey_verifcation_success : false
 				});
 				return;
 			}
@@ -350,9 +369,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			log.err("Error fetching pubKey: "+ reason);
 
+			const err_msg = "User's public key not found! Check internet connection.";
 			this.setState({
-				is_fetching_public_key : false,
-				public_key_err_msg     : "User's public key not found! Check internet connection."
+				is_fetching_public_key     : false,
+				public_key_err_msg         : err_msg,
+				pubkey_verifcation_success : false
 			});
 		});
 	}
@@ -384,9 +405,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				log.err("Error fetching blockchainInfo: "+ response.status);
 
+				const err_msg = "Could not fetch blockchain info. Ethereum node is having technical difficulties?.";
 				this.setState({
 					is_fetching_merkle_tree_root : false,
-					merkle_tree_root_err_msg     : "Could not fetch blockchain info. Ethereum node is having technical difficulties?."
+					merkle_tree_root_err_msg     : err_msg,
+					pubkey_verifcation_success   : false
 				});
 				return;
 			}
@@ -402,7 +425,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			this.setState({
 				is_fetching_merkle_tree_root : false,
-				is_fetching_merkle_tree      : true,
+				is_fetching_merkle_tree_file : true,
 				merkle_tree_root             : merkle_tree_root
 
 			}, ()=> {
@@ -414,9 +437,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			log.err("Error fetching blockchainInfo: "+ reason);
 
+			const err_msg = "Could not fetch blockchain info! Check internet connection.";
 			this.setState({
 				is_fetching_merkle_tree_root : false,
-				merkle_tree_root_err_msg     : "Could not fetch blockchain info! Check internet connection."
+				merkle_tree_root_err_msg     : err_msg,
+				pubkey_verifcation_success   : false
 			});
 		});
 	}
@@ -430,7 +455,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		this.setState({
-			is_fetching_merkle_tree : true
+			is_fetching_merkle_tree_file : true
 		});
 
 		const url = util.merkleTreeFileURL(merkle_tree_root);
@@ -444,9 +469,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				log.err("Error fetching merkle tree: "+ response.status);
 
+				const err_msg = "Could not fetch merkle tree. We may be experiencing technical difficulties.";
 				this.setState({
-					is_fetching_merkle_tree : false,
-					merkle_tree_err_msg     : "Could not fetch merkle tree. We may be experiencing technical difficulties."
+					is_fetching_merkle_tree_file : false,
+					merkle_tree_file_err_msg     : err_msg,
+					pubkey_verifcation_success   : false
 				});
 				return;
 			}
@@ -458,17 +485,118 @@ class Send extends React.Component<ISendProps, ISendState> {
 			log.debug("merkleTree JSON: "+ JSON.stringify(json, null, 2));
 
 			this.setState({
-				is_fetching_merkle_tree : false,
-				merkle_tree             : json
+				is_fetching_merkle_tree_file : false,
+				is_verifying_public_key      : true,
+				merkle_tree_file             : json
+
+			}, ()=> {
+
+				this.verifyPublicKey();
 			});
 
 		}).catch((reason)=> {
 
 			log.err("Error fetching merkleTree: "+ reason);
 
+			const err_msg = "Could not fetch merkle tree! Check internet connection.";
 			this.setState({
-				is_fetching_merkle_tree : false,
-				merkle_tree_err_msg     : "Could not fetch merkle tree! Check internet connection."
+				is_fetching_merkle_tree_file : false,
+				merkle_tree_file_err_msg     : err_msg,
+				pubkey_verifcation_success   : false
+			});
+		});
+	}
+
+	protected verifyPublicKey = (): void => {
+		log.debug("verifyPublicKey()");
+
+		const merkle_tree_file = this.state.merkle_tree_file;
+		if (merkle_tree_file == null) {
+			return;
+		}
+
+		merkle_tree_gen.fromArray({
+			array: merkle_tree_file.values
+		
+		}, (err, tree)=> {
+
+			if (err || tree == null)
+			{
+				log.debug("merkle_tree_gen: err: "+ err);
+
+				this.setState({
+					is_verifying_public_key     : false,
+					pubkey_verifcation_success  : false,
+					pubkey_verification_err_msg : "Error performing crypto in browser. Is this an outdated browser?"
+				});
+				return;
+			}
+
+			log.debug("merkle_tree_gen: tree: "+ JSON.stringify(tree, null, 2));
+
+			// Checks to perform:
+			// - The merkle tree file contains an entry for our userID
+			// - The merkle tree entry matches the public key info we fetched
+			// - The merkle tree root matches our own calculations
+
+			const _gotoErr = (msg: string): void => {
+				this.setState({
+					is_verifying_public_key     : false,
+					pubkey_verifcation_success  : false,
+					pubkey_verification_err_msg : msg,
+					pubkey_tampering_detected   : true
+				});
+			}
+
+			const user_profile = this.state.user_profile;
+			const user_id = user_profile ? user_profile.s4.user_id : "";
+
+			const pubkey = this.state.public_key!;
+
+			const values_idx = merkle_tree_file.lookup[user_id];
+			if (values_idx == null || values_idx < 0 || values_idx >= merkle_tree_file.values.length)
+			{
+				_gotoErr("UserID not found in merkle tree file !");
+				return;
+			}
+
+			const value_json_str = merkle_tree_file.values[values_idx];
+			let value: MerkleTreeFileValue|null = null;
+			try {
+				value = JSON.parse(value_json_str);
+			} catch (e) {
+				log.err("Error parsing merkle_tree_file.value[]: "+ e);
+			}
+
+			if (value == null             ||
+				 !_.isObject(value)        ||
+				 !_.isString(value.userID) ||
+			    !_.isString(value.pubKey) ||
+				 !_.isString(value.keyID))
+			{
+				_gotoErr("User's public key not found in merkle tree file !");
+				return;
+			}
+
+			if (value.userID != user_id       ||
+				 value.pubKey != pubkey.pubKey ||
+			    value.keyID  != pubkey.keyID   )
+			{
+				_gotoErr("Public key information doesn't match value in merkle tree file !");
+				return;
+			}
+
+			if (tree.root != merkle_tree_file.merkle.root)
+			{
+				_gotoErr("Merkle tree root mismatch !");
+				return;
+			}
+
+			this.setState({
+				is_verifying_public_key     : false,
+				pubkey_verifcation_success  : true,
+				pubkey_verification_err_msg : null,
+				pubkey_tampering_detected   : false
 			});
 		});
 	}
@@ -695,7 +823,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const merkle_tree_root = state.merkle_tree_root;
 
 		let section_summary: React.ReactNode;
-		if (state.is_fetching_merkle_tree_root)
+		if (state.is_fetching_merkle_tree_root || state.is_fetching_merkle_tree_file)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
@@ -704,21 +832,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 						size={16}
 					/>
 					<Typography className={classes.section_expansionPanel_summary_text}>
-						{this.state.is_fetching_merkle_tree_root ?
-						  "Fetching blockchain verification (1 of 2)..." :
-						  "Fetching blockchain verification (2 of 2)..."
-						}
+						{state.is_fetching_merkle_tree_root
+							? "Fetching blockchain verification (1 of 2)..."
+							: "Fetching blockchain verification (2 of 2)..."}
 					</Typography>
 				</div>
 			);
 		}
-		else if (state.merkle_tree_root_err_msg)
+		else if (state.merkle_tree_root_err_msg || state.merkle_tree_file_err_msg)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
 					<ReportProblemIcon color="error"/>
 					<Typography className={classes.section_expansionPanel_summary_text}>
-						{state.merkle_tree_root_err_msg || "Generic error message"}
+						{state.merkle_tree_root_err_msg || state.merkle_tree_file_err_msg}
 					</Typography>
 				</div>
 			);
@@ -742,7 +869,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					<div className={classes.section_expansionPanel_summary}>
 						<CheckCircleIcon nativeColor='green' />
 						<Typography className={classes.section_expansionPanel_summary_text}>
-							{"Fetched blockchain information"}
+							{"Fetched blockchain verification"}
 						</Typography>
 					</div>
 				);
@@ -797,9 +924,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 					or third party interference.
 				</Typography>
 				<Typography paragraph={true}>
-					We wrote and deployed a smart contract that allows a user's public key
-					to be stored on the blockchain. And it's written in such a way that
-					allows the public key information to be written once & only once.
+					We wrote and deployed a smart contract that stores the user's public key
+					information on the blockchain. And it's written in such a way that
+					allows the public key info to be written once & only once.
 					Since the smart contract itself is immutable (due to the nature of Ethereum),
 					this creates an immutable record of the public key. Thus the keys of Storm4
 					users are immutable, verifiable, auditable & tamper-proof.
@@ -856,11 +983,79 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderExpansionPanel3(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		let section_summary: React.ReactNode;
+		if (state.is_verifying_public_key)
+		{
+			section_summary = (
+				<div className={classes.section_expansionPanel_summary}>
+					<CircularProgress
+						color="secondary"
+						size={16}
+					/>
+					<Typography className={classes.section_expansionPanel_summary_text}>
+						{"Verifying public key..."}
+					</Typography>
+				</div>
+			);
+		}
+		else if (state.pubkey_tampering_detected)
+		{
+			section_summary = (
+				<div className={classes.section_expansionPanel_summary}>
+					<ReportProblemIcon color="error"/>
+					<Typography className={classes.section_expansionPanel_summary_text}>
+						{"Public key has been tampered with! File sending is disabled."}
+					</Typography>
+				</div>
+			);
+		}
+		else if (_.isBoolean(state.pubkey_verifcation_success))
+		{
+			if (state.pubkey_verifcation_success == false)
+			{
+				section_summary = (
+					<div className={classes.section_expansionPanel_summary}>
+						<ReportProblemIcon nativeColor="yellow"/>
+						<Typography className={classes.section_expansionPanel_summary_text}>
+							{"Unable to verify public key"}
+						</Typography>
+					</div>
+				);
+			}
+			else
+			{
+				section_summary = (
+					<div className={classes.section_expansionPanel_summary}>
+						<CheckCircleIcon nativeColor='green' />
+						<Typography className={classes.section_expansionPanel_summary_text}>
+							{"Public key verified"}
+						</Typography>
+					</div>
+				);
+			}
+		}
+		else
+		{
+			section_summary = (
+				<div className={classes.section_expansionPanel_summary}>
+					<CircularProgress
+						color="secondary"
+						size={16}
+					/>
+					<Typography className={classes.section_expansionPanel_summary_text}>
+						{"Initializing..."}
+					</Typography>
+				</div>
+			);
+		}
 
 		return (
 			<ExpansionPanel>
 				<ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
-					{"Verifying public key..."}
+					{section_summary}
 				</ExpansionPanelSummary>
 				<ExpansionPanelDetails>
 					{"content goes here"}

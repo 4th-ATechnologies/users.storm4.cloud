@@ -44,17 +44,17 @@ class Main extends React.Component<IMainProps, IMainState> {
 		const state = this.state;
 		const {classes} = this.props;
 
-		let pathname = this.props.location.pathname;
-		if (pathname.startsWith('/')) {
-			pathname = pathname.substring(1);
-		}
-		
-		log.debug("pathname: "+ pathname);
+		let user_id: string|null = null;
 
-		if (util.isValidUserID(pathname))
+		const pathname = this.props.location.pathname;
+		if (pathname.startsWith('/id/')) {
+			user_id = pathname.substring(4);
+		}
+
+		if (user_id != null && util.isValidUserID(user_id))
 		{
 			return (
-				<SendPage user_id={pathname} />
+				<SendPage user_id={user_id} />
 			);
 		}
 		else

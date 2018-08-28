@@ -790,7 +790,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 		if (diff > 20)
 		{
-			this.props.history.push(`/${user_id}`);
+			this.props.history.push(`/id/${user_id}`);
 		}
 	}
 
