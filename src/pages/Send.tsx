@@ -3,6 +3,7 @@ import * as _ from 'lodash';
 import * as merkle_tree_gen from 'merkle-tree-gen';
 import * as queryString from 'query-string';
 
+import Dropzone, {ImageFile} from 'react-dropzone'
 import ReactImageFallback from 'react-image-fallback';
 
 import {RouteComponentProps} from 'react-router';
@@ -44,11 +45,18 @@ import ListItemIcon from '@material-ui/core/ListItemIcon';
 import ListItemText from '@material-ui/core/ListItemText';
 import Menu from '@material-ui/core/Menu';
 import MenuItem from '@material-ui/core/MenuItem';
+import Table from '@material-ui/core/Table';
+import TableBody from '@material-ui/core/TableBody';
+import TableCell from '@material-ui/core/TableCell';
+import TableFooter from '@material-ui/core/TableFooter';
+import TablePagination from '@material-ui/core/TablePagination';
+import TableRow from '@material-ui/core/TableRow';
 import Tooltip from '@material-ui/core/Tooltip';
 import Typography from '@material-ui/core/Typography';
 
 import AccountCircleIcon from '@material-ui/icons/AccountCircle';
 import CheckCircleIcon from '@material-ui/icons/CheckCircle';
+import DeleteIcon from '@material-ui/icons/Delete';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import ReportProblemIcon from '@material-ui/icons/ReportProblem';
@@ -188,6 +196,39 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginLeft: 0,
 		paddingLeft: 0
 	},
+	section_fileSelection: {
+		marginTop: theme.spacing.unit * 4
+	},
+	dropText: {
+		padding: 0,
+		marginTop: theme.spacing.unit * 4,
+		marginBottom: 0,
+		marginLeft: theme.spacing.unit,
+		marginRight: theme.spacing.unit,
+	},
+	table: {
+		minWidth: 300,
+	//	backgroundColor: 'pink'
+	},
+	tableRow_containerFileName: {
+
+	},
+	tableRow_containerButtons: {
+		display: 'flex',
+		flexDirection: 'row',
+		flexWrap: 'nowrap',
+		justifyContent: 'flex-end',
+		alignItems: 'center',
+		alignContent: 'center',
+		marginLeft: 0, // see: tableRow_containerFileName.marginRight
+		marginRight: theme.spacing.unit,
+		marginTop: 2,
+		marginBottom: 2
+	},
+	trashIcon: {
+		width: 24,
+		height: 24
+	}
 });
 
 interface ISendProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
@@ -232,6 +273,10 @@ interface ISendState {
 	//
 	userIdentsMenuAnchor : HTMLElement|null,
 	userIdentsMenuOpen   : boolean,
+
+	// Files
+	// 
+	file_list : ImageFile[]
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -261,7 +306,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		calculated_merkle_tree_root : null,
 
 		userIdentsMenuAnchor : null,
-		userIdentsMenuOpen   : false
+		userIdentsMenuOpen   : false,
+
+		file_list: []
 	}
 
 	protected getIdentityIdx = (): number => {
@@ -716,6 +763,34 @@ class Send extends React.Component<ISendProps, ISendState> {
 			userIdentsMenuAnchor : null,
 			userIdentsMenuOpen   : false
 		});
+	}
+
+	protected onDrop = (acceptedFiles: ImageFile[], rejectedFiles: ImageFile[])=> {
+		log.debug("onDrop()");
+		log.debug("acceptedFiles: "+ acceptedFiles);
+		log.debug("rejectedFiles: "+ rejectedFiles);
+
+		for (const file of acceptedFiles) {
+			log.debug(`name(${file.name}) type(${file.type}) size(${file.size})`);
+		}
+
+		this.setState((current_state)=> {
+
+			const next_state = {...current_state};
+			for (const file of acceptedFiles) {
+				next_state.file_list.push(file);
+			}
+
+			return next_state;
+		});
+	}
+
+	protected deleteFile = (
+		index : string,
+		event : string
+	): void =>
+	{
+		log.debug("deleteFile(): "+ index);
 	}
 
 	public renderUserProfile(): React.ReactNode|React.ReactFragment {
@@ -1329,6 +1404,58 @@ class Send extends React.Component<ISendProps, ISendState> {
 			</ExpansionPanel>
 		);
 	}
+
+	public renderFileSelection(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		return (
+			<div className={classes.section_fileSelection}>
+				<Dropzone
+					onDrop={this.onDrop}
+					disabled={this.state.pubkey_tampering_detected || false}
+				>
+					<Typography align="center" variant="title" className={classes.dropText}>
+						Drag-n-Drop<br/>Files Here
+					</Typography>
+				</Dropzone>
+			</div>
+		);
+	}
+
+	public renderFileList(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		const file_list = state.file_list;
+
+		return (
+			<div>
+				<Table className={classes.table}>
+					<TableBody>
+						{file_list.map((file, idx)=> {
+
+							const onClick = this.deleteFile.bind(this, idx);
+
+							return (
+								<TableRow key={`${idx}`}>
+									<TableCell padding="none">
+										<div className={classes.tableRow_containerButtons}>
+											<Tooltip title="Remove file from list">
+												<IconButton onClick={onClick}>
+													<DeleteIcon className={classes.deleteIcon}/>
+												</IconButton>
+											</Tooltip>
+										</div>
+									</TableCell>
+								</TableRow>
+							);
+						})}
+					</TableBody>
+				</Table>
+			</div>
+		);
+	}
 	
 	public render(): React.ReactNode {
 		const state = this.state;
@@ -1346,18 +1473,22 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 		else
 		{
-			const section_expantionPanel1 = this.renderExpansionPanel1();
-			const section_expantionPanel2 = this.renderExpansionPanel2();
-			const section_expantionPanel3 = this.renderExpansionPanel3();
+			const section_expansionPanel1 = this.renderExpansionPanel1();
+			const section_expansionPanel2 = this.renderExpansionPanel2();
+			const section_expansionPanel3 = this.renderExpansionPanel3();
+			const section_fileSelection   = this.renderFileSelection();
+			const section_fileList        = this.renderFileList();
 
 			return (
 				<div className={classes.root}>
 					{section_userProfile}
 					<div className={classes.section_expansionPanels}>
-						{section_expantionPanel1}
-						{section_expantionPanel2}
-						{section_expantionPanel3}
+						{section_expansionPanel1}
+						{section_expansionPanel2}
+						{section_expansionPanel3}
 					</div>
+					{section_fileSelection}
+					{section_fileList}
 				</div>
 			);
 		}
