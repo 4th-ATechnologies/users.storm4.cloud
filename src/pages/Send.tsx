@@ -226,6 +226,7 @@ interface ISendState {
 	pubkey_verifcation_success  : boolean|null,
 	pubkey_verification_err_msg : string|null,
 	pubkey_tampering_detected   : boolean|null,
+	calculated_merkle_tree_root : string|null
 
 	// User identity menu
 	//
@@ -257,6 +258,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		pubkey_verifcation_success  : null,
 		pubkey_verification_err_msg : null,
 		pubkey_tampering_detected   : null,
+		calculated_merkle_tree_root : null,
 
 		userIdentsMenuAnchor : null,
 		userIdentsMenuOpen   : false
@@ -600,7 +602,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 					is_verifying_public_key     : false,
 					pubkey_verifcation_success  : false,
 					pubkey_verification_err_msg : msg,
-					pubkey_tampering_detected   : true
+					pubkey_tampering_detected   : true,
+					calculated_merkle_tree_root : tree.root
 				});
 			}
 
@@ -652,7 +655,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 				is_verifying_public_key     : false,
 				pubkey_verifcation_success  : true,
 				pubkey_verification_err_msg : null,
-				pubkey_tampering_detected   : false
+				pubkey_tampering_detected   : false,
+				calculated_merkle_tree_root : tree.root
 			});
 		});
 	}
@@ -1171,6 +1175,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const state = this.state;
 		const {classes} = this.props;
 
+		const user_id = this.props.user_id;
+
+		const pub_key = state.public_key;
+		const merkle_tree_root = state.merkle_tree_root;
+		const merkle_tree_file = state.merkle_tree_file;
+
 		let section_summary: React.ReactNode;
 		if (state.is_verifying_public_key)
 		{
@@ -1237,13 +1247,84 @@ class Send extends React.Component<ISendProps, ISendState> {
 			);
 		}
 
+		let section_details: React.ReactNode;
+		if (pub_key && merkle_tree_root && merkle_tree_file)
+		{
+			const keyID_verification =
+				`echo -n "${pub_key.pubKey}" | base64 --decode | openssl dgst -sha256 | cut -c -32 | xxd -r -p | base64`;
+
+			const merkle_tree_url = util.merkleTreeFileURL(merkle_tree_root);
+
+			let merkle_tree_value: string;
+			{
+				const values_idx = merkle_tree_file.lookup[user_id];
+				if (values_idx == null || values_idx < 0 || values_idx >= merkle_tree_file.values.length)
+				{
+					merkle_tree_value = "Not found in merkle tree file !";
+				}
+				else
+				{
+					merkle_tree_value = merkle_tree_file.values[values_idx];
+				}
+			}
+
+			section_details = (
+				<div className={classes.section_expansionPanel_details}>
+					<Typography component="ul" paragraph={true}>
+						<li className={classes.wrap}>
+							Public Key <span className={classes.gray}>(Base64)</span>: {pub_key.pubKey}
+						</li>
+						<li className={classes.wrap}>
+							KeyID <span className={classes.gray}>(Base64)</span>: {pub_key.keyID}
+						</li>
+						<li className={classes.wrap}>
+							KeyID Verification:
+							<ul className={classes.sub_ul}>
+								<li className={classes.sub_ul_li}>
+									{keyID_verification}
+								</li>
+							</ul>
+						</li>
+					</Typography>
+					<Typography component="ul" paragraph={true}>
+						<li className={classes.wrap}>
+							Merkle Tree File: <a href={merkle_tree_url} className={classes.a_noLinkColor}>link</a>
+						</li>
+						<li className={classes.wrap}>
+							Merkle Tree Value: <span className={classes.gray}>(JSON)</span>: {merkle_tree_value}
+						</li>
+					</Typography>
+					<Typography component="ul" paragraph={true}>
+						<li className={classes.wrap}>
+							Calculated Merkle Tree Root:
+							<ul className={classes.sub_ul}>
+								<li className={classes.sub_ul_li}>
+									{state.calculated_merkle_tree_root || ""}
+								</li>
+							</ul>
+						</li>
+						<li className={classes.wrap}>
+							Calculated With: <a href="https://github.com/devedge/merkle-tree-gen" className={classes.a_noLinkColor}>merkle-tree-gen</a>
+						</li>
+					</Typography>
+				</div>
+			);
+		}
+		else
+		{
+			section_details = (
+				<div className={classes.section_expansionPanel_details}>
+				</div>
+			);
+		}
+
 		return (
 			<ExpansionPanel>
 				<ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
 					{section_summary}
 				</ExpansionPanelSummary>
 				<ExpansionPanelDetails>
-					{"content goes here"}
+					{section_details}
 				</ExpansionPanelDetails>
 			</ExpansionPanel>
 		);
