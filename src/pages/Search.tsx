@@ -176,6 +176,12 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	sendIcon: {
 		width: 24,
 		height: 24
+	},
+	wrap: {
+		'overflow-wrap': 'break-word',
+		wordWrap: 'break-word',
+		wordBreak: 'break-all',
+		overflowWrap: 'break-word'
 	}
 });
 
@@ -1044,7 +1050,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 												{avatarSection}
 											</div>
 											<div className={classes.tableRow_nameAndProvider}>
-												<Typography variant="headline">{displayNameSection}</Typography>
+												<Typography variant="headline" className={classes.wrap}>{displayNameSection}</Typography>
 												<img src={idpUrl} height="22" className={classes.identityProviderImg}/>
 											</div>
 										</div>

@@ -2,6 +2,7 @@ import * as React from 'react';
 import * as _ from 'lodash';
 import * as merkle_tree_gen from 'merkle-tree-gen';
 import * as queryString from 'query-string';
+import * as filesize from 'filesize';
 
 import Dropzone, {ImageFile} from 'react-dropzone'
 import ReactImageFallback from 'react-image-fallback';
@@ -36,6 +37,7 @@ import {
 
 import Avatar from '@material-ui/core/Avatar';
 import Badge from '@material-ui/core/Badge';
+import Button from '@material-ui/core/Button';
 import CircularProgress from '@material-ui/core/CircularProgress';
 import ExpansionPanel from '@material-ui/core/ExpansionPanel';
 import ExpansionPanelSummary from '@material-ui/core/ExpansionPanelSummary';
@@ -48,9 +50,8 @@ import MenuItem from '@material-ui/core/MenuItem';
 import Table from '@material-ui/core/Table';
 import TableBody from '@material-ui/core/TableBody';
 import TableCell from '@material-ui/core/TableCell';
-import TableFooter from '@material-ui/core/TableFooter';
-import TablePagination from '@material-ui/core/TablePagination';
 import TableRow from '@material-ui/core/TableRow';
+import TextField from '@material-ui/core/TextField'
 import Tooltip from '@material-ui/core/Tooltip';
 import Typography from '@material-ui/core/Typography';
 
@@ -161,7 +162,10 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	},
 	wrap: {
 		wordWrap: 'break-word',
-		wordBreak: 'break-all'
+		wordBreak: 'break-all',
+
+		// This does what we want, but doesn't seem to work
+		overflowWrap: 'break-word'
 	},
 	gray: {
 		color: theme.palette.text.secondary
@@ -199,19 +203,44 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	section_fileSelection: {
 		marginTop: theme.spacing.unit * 4
 	},
-	dropText: {
-		padding: 0,
-		marginTop: theme.spacing.unit * 4,
-		marginBottom: 0,
-		marginLeft: theme.spacing.unit,
-		marginRight: theme.spacing.unit,
+	dropZone_description_container: {
+		display: 'flex',
+		flexDirection: 'column',
+		flexWrap: 'nowrap',
+		justifyContent: 'center',
+		alignItems: 'center',
+		alignContent: 'center',
+		height: 200,
+		margin: 0,
+		padding: theme.spacing.unit
+	},
+	dropZone_description_text_primary: {
+		flexBasis: 'auto'
+	},
+	dropZone_description_text_secondary: {
+		flexBasis: 'auto',
+		color: theme.palette.text.secondary,
+		marginTop: theme.spacing.unit,
+		marginBottom: theme.spacing.unit
+	},
+	section_fileList: {
+		marginTop: theme.spacing.unit * 4
 	},
 	table: {
-		minWidth: 300,
+		maxWidth: 600,
 	//	backgroundColor: 'pink'
 	},
-	tableRow_containerFileName: {
-
+	tableRow_fileName: {
+		display: 'flex',
+		flexDirection: 'row',
+		flexWrap: 'nowrap',
+		justifyContent: 'flex-start',
+		alignItems: 'center',
+		alignContent: 'center',
+		marginLeft: theme.spacing.unit,
+		marginRight: 0, 
+		marginTop: 2,
+		marginBottom: 2
 	},
 	tableRow_containerButtons: {
 		display: 'flex',
@@ -220,14 +249,25 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		justifyContent: 'flex-end',
 		alignItems: 'center',
 		alignContent: 'center',
-		marginLeft: 0, // see: tableRow_containerFileName.marginRight
+		marginLeft: theme.spacing.unit * 2,
 		marginRight: theme.spacing.unit,
 		marginTop: 2,
 		marginBottom: 2
 	},
+	trashIconButton: {
+		width: 32,
+		height: 32,
+		marginLeft: theme.spacing.unit
+	},
 	trashIcon: {
-		width: 24,
-		height: 24
+		width: 22,
+		height: 22
+	},
+	comment: {
+		width: 300
+	},
+	section_sendButton: {
+		marginTop: theme.spacing.unit * 2
 	}
 });
 
@@ -277,6 +317,10 @@ interface ISendState {
 	// Files
 	// 
 	file_list : ImageFile[]
+
+	// Uploading state
+	// 
+	is_uploading : boolean
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -308,7 +352,22 @@ class Send extends React.Component<ISendProps, ISendState> {
 		userIdentsMenuAnchor : null,
 		userIdentsMenuOpen   : false,
 
-		file_list: []
+		file_list: [],
+
+		is_uploading : false
+	}
+
+	protected isProbablyMobile = (): boolean => {
+
+		const user_agent = navigator.userAgent;
+
+		const regex_android = new RegExp(/Android/i);
+		const regex_iOS     = new RegExp(/iPhone|iPad|iPod/i);
+
+		const android = regex_android.test(user_agent);
+		const iOS     = regex_iOS.test(user_agent);
+
+		return (android || iOS);
 	}
 
 	protected getIdentityIdx = (): number => {
@@ -445,7 +504,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					public_key_err_msg         : err_msg,
 					pubkey_verifcation_success : false
 				});
-				return;
+				return Promise.reject();
 			}
 
 			return response.json();
@@ -457,18 +516,34 @@ class Send extends React.Component<ISendProps, ISendState> {
 			this.setState({
 				is_fetching_public_key : false,
 				public_key             : json
+
+			}, ()=> {
+
+				if (this.state.public_key && this.state.merkle_tree_file) {
+					this.verifyPublicKey();
+				}
 			});
 
 		}).catch((reason)=> {
 
-			log.err("Error fetching pubKey: "+ reason);
+			if (reason == null)
+			{
+				// This is why I don't like promises...
+				// This is called when the statusCode != 200.
+				// 
+				// Yup, it's retarded.
+			}
+			else
+			{
+				log.err("Error fetching pubKey: "+ reason);
 
-			const err_msg = "User's public key not found! Check internet connection.";
-			this.setState({
-				is_fetching_public_key     : false,
-				public_key_err_msg         : err_msg,
-				pubkey_verifcation_success : false
-			});
+				const err_msg = "User's public key not found! Check internet connection.";
+				this.setState({
+					is_fetching_public_key     : false,
+					public_key_err_msg         : err_msg,
+					pubkey_verifcation_success : false
+				});
+			}
 		});
 	}
 
@@ -596,7 +671,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			}, ()=> {
 
-				this.verifyPublicKey();
+				if (this.state.public_key && this.state.merkle_tree_file) {
+					this.verifyPublicKey();
+				}
 			});
 
 		}).catch((reason)=> {
@@ -786,11 +863,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	protected deleteFile = (
-		index : string,
+		index : number,
 		event : string
 	): void =>
 	{
 		log.debug("deleteFile(): "+ index);
+
+		this.setState((current_state)=> {
+
+			const next_state = {...current_state};
+			next_state.file_list.splice(index, 1);
+
+			return next_state;
+		});
+	}
+
+	protected commentTextFieldChanged = (
+		event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+	) => {
+		const newValue = event.target.value;
+		log.debug("commentTextFieldChanged() => "+ newValue);
+
+		// Todo...
 	}
 
 	public renderUserProfile(): React.ReactNode|React.ReactFragment {
@@ -1409,15 +1503,61 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const state = this.state;
 		const {classes} = this.props;
 
+		const isMobile = this.isProbablyMobile();
+
+		let description: React.ReactNode;
+		if (this.isProbablyMobile())
+		{
+			description = (
+				<div className={classes.dropZone_description_container}>
+					<Typography
+						align="center"
+						variant="title"
+					className={classes.dropZone_description_text_primary}>
+						Tap to<br/>
+						Select Files
+					</Typography>
+				</div>
+			);
+		}
+		else
+		{
+			description = (
+				<div className={classes.dropZone_description_container}>
+					<Typography
+						align="center"
+						variant="title"
+						className={classes.dropZone_description_text_primary}
+					>
+						Drag-n-Drop<br/>
+						Files Here
+					</Typography>
+					<Typography
+						align="center"
+						variant="title"
+						className={classes.dropZone_description_text_secondary}
+					>
+						or
+					</Typography>
+					<Typography
+						align="center"
+						variant="title"
+						className={classes.dropZone_description_text_primary}
+					>
+						Click to<br/>
+						Select Files
+					</Typography>
+				</div>
+			);
+		}
+
 		return (
 			<div className={classes.section_fileSelection}>
 				<Dropzone
 					onDrop={this.onDrop}
 					disabled={this.state.pubkey_tampering_detected || false}
 				>
-					<Typography align="center" variant="title" className={classes.dropText}>
-						Drag-n-Drop<br/>Files Here
-					</Typography>
+					{description}
 				</Dropzone>
 			</div>
 		);
@@ -1430,7 +1570,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const file_list = state.file_list;
 
 		return (
-			<div>
+			<div className={classes.section_fileList}>
 				<Table className={classes.table}>
 					<TableBody>
 						{file_list.map((file, idx)=> {
@@ -1440,10 +1580,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 							return (
 								<TableRow key={`${idx}`}>
 									<TableCell padding="none">
+										<div className={classes.tableRow_fileName}>
+											<Typography className={classes.wrap}>{file.name}</Typography>
+										</div>
+									</TableCell>
+									<TableCell padding="none">
 										<div className={classes.tableRow_containerButtons}>
+											<Typography>{filesize(file.size)}</Typography>
 											<Tooltip title="Remove file from list">
-												<IconButton onClick={onClick}>
-													<DeleteIcon className={classes.deleteIcon}/>
+												<IconButton onClick={onClick} className={classes.trashIconButton}>
+													<DeleteIcon className={classes.trashIcon}/>
 												</IconButton>
 											</Tooltip>
 										</div>
@@ -1453,6 +1599,48 @@ class Send extends React.Component<ISendProps, ISendState> {
 						})}
 					</TableBody>
 				</Table>
+			</div>
+		);
+	}
+
+	public renderComment(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		return (
+			<div className={classes.section_comment}>
+				<TextField
+					id="comment"
+					label="Optional comment (encrypted)"
+					margin="normal"
+					multiline={true}
+					onChange={this.commentTextFieldChanged}
+					className={classes.comment}
+					inputProps={{
+						maxLength: 200,
+					}}
+				/>
+				<Typography align="right" variant="caption">200 characters left</Typography>
+			</div>
+		);
+	}
+
+	public renderSendButton(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		const is_disabled = (state.file_list.length == 0) || state.is_uploading;
+		log.debug("is_disabled: "+ is_disabled);
+		log.debug("state.file_list.length: "+ state.file_list.length);
+		log.debug("state.is_uploading: "+ state.is_uploading);
+
+		return (
+			<div className={classes.section_sendButton}>
+				<Button
+					variant="contained"
+					color="primary"
+					disabled={is_disabled}
+				>Send Securely</Button>
 			</div>
 		);
 	}
@@ -1478,6 +1666,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const section_expansionPanel3 = this.renderExpansionPanel3();
 			const section_fileSelection   = this.renderFileSelection();
 			const section_fileList        = this.renderFileList();
+			const section_comment         = this.renderComment();
+			const section_button          = this.renderSendButton();
 
 			return (
 				<div className={classes.root}>
@@ -1489,6 +1679,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 					</div>
 					{section_fileSelection}
 					{section_fileList}
+					{section_comment}
+					{section_button}
 				</div>
 			);
 		}
