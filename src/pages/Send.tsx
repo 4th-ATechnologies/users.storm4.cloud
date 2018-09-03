@@ -1,15 +1,18 @@
-import * as React from 'react';
 import * as _ from 'lodash';
+import * as filesize from 'filesize';
 import * as merkle_tree_gen from 'merkle-tree-gen';
 import * as queryString from 'query-string';
-import * as filesize from 'filesize';
+import * as React from 'react';
+import * as S3 from 'aws-sdk/clients/s3';
 
 import Dropzone, {ImageFile} from 'react-dropzone'
 import ReactImageFallback from 'react-image-fallback';
 
+import {Credentials as AWSCredentials} from 'aws-sdk';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 
+import * as credentials_helper from '../util/Credentials';
 import * as util from '../util/Util';
 import * as users_cache from '../util/UsersCache';
 
@@ -66,7 +69,7 @@ import ReportProblemIcon from '@material-ui/icons/ReportProblem';
 const log = Logger.Make('debug', 'Send');
 
 const AVATAR_SIZE = 96;
-
+const COMMENT_MAX_LENGTH = 200;
 const HASH_TYPE_ID = "0"; // result for hashTypeID("sha256")
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
@@ -314,13 +317,15 @@ interface ISendState {
 	userIdentsMenuAnchor : HTMLElement|null,
 	userIdentsMenuOpen   : boolean,
 
-	// Files
+	// Files & comment
 	// 
-	file_list : ImageFile[]
+	file_list           : ImageFile[]
+	commentTextFieldStr : string,
 
-	// Uploading state
+	// Uploading
 	// 
-	is_uploading : boolean
+	is_uploading : boolean,
+	upload_index : number
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -352,9 +357,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 		userIdentsMenuAnchor : null,
 		userIdentsMenuOpen   : false,
 
-		file_list: [],
+		file_list           : [],
+		commentTextFieldStr : "",
 
-		is_uploading : false
+		is_uploading : false,
+		upload_index : 0
 	}
 
 	protected isProbablyMobile = (): boolean => {
@@ -884,7 +891,124 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const newValue = event.target.value;
 		log.debug("commentTextFieldChanged() => "+ newValue);
 
-		// Todo...
+		this.setState({
+			commentTextFieldStr: newValue
+		});
+	}
+
+	protected onSend = (): void => {
+		log.debug("onSend()");
+
+		this.uploadNextFile();
+	}
+
+	protected uploadNextFile = (): void => {
+		log.debug("uploadNextFile()");
+
+		if (this.state.is_uploading) {
+			log.debug("Ignoring duplicate click");
+			return;
+		}
+
+		const file = this.state.file_list[this.state.upload_index];
+
+		if (file.size < (1024 * 1024 * 10)) {
+			this.uploadFile_singlePart(file);
+		}
+		else {
+			this.uploadFile_singlePart(file);
+		}
+	}
+
+	protected uploadFile_singlePart = (file: ImageFile)=> {
+		log.debug("uploadFile_singlePart()");
+
+		function _readFile(): void
+		{
+			log.debug("_readFile()");
+
+			const file_stream = new FileReader();
+			file_stream.addEventListener("loadend", ()=>{
+
+				const file_buffer = file_stream.result as ArrayBuffer;
+				if (file_buffer == null) {
+					_fail("Unable to read file: "+ file.name);
+				}
+				else {
+					_fetchCredentials({file, file_buffer})
+				}
+			});
+
+			file_stream.readAsArrayBuffer(file);
+		}
+
+		function _fetchCredentials(
+			state: {
+				file        : ImageFile,
+				file_buffer : ArrayBuffer
+			}
+		): void
+		{
+			log.debug("_fetchCredentials()");
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					_fail("Unable to connect to server. Check internet connection.");
+				}
+			});
+		}
+
+		function _performUpload(
+			state: {
+				file        : ImageFile,
+				file_buffer : ArrayBuffer,
+				credentials : AWSCredentials
+			}
+		): void
+		{
+			const s3 = new S3({
+				credentials : state.credentials,
+				region      : 'us-west-2'
+			});
+
+			const upload = s3.upload({
+				Bucket        : 'cloud.storm4.test',
+				Key           : `staging/${file.name}`,
+				Body          : state.file_buffer,
+				ContentLength : state.file_buffer.byteLength
+			});
+
+			upload.on("httpUploadProgress", (progress)=> {
+
+				log.debug(`progress: loaded(${progress.loaded}) total(${progress.total})`);
+			});
+
+			upload.send((err, data)=> {
+
+				if (err) {
+					log.err("upload err: "+ err);
+				}
+				else {
+					log.debug("upload data: "+ data);
+				}
+			});
+		}
+
+		function _fail(err_msg: string)
+		{
+			log.err("uploadFile_singlePart: err: "+ err_msg);
+
+			// Todo...
+		}
+
+		this.setState({
+			is_uploading: true
+		});
+		_readFile();
 	}
 
 	public renderUserProfile(): React.ReactNode|React.ReactFragment {
@@ -1607,6 +1731,22 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const state = this.state;
 		const {classes} = this.props;
 
+		const is_disabled =
+			state.pubkey_tampering_detected ||
+			state.is_uploading;
+
+		const chars_remaining = COMMENT_MAX_LENGTH - state.commentTextFieldStr.length;
+		let chars_remaining_str: string;
+		if (chars_remaining < 0) {
+			chars_remaining_str = `Comment will be truncated! ${chars_remaining} characters left`;
+		}
+		else if (chars_remaining == 1) {
+			chars_remaining_str = `${chars_remaining} character left`;
+		}
+		else {
+			chars_remaining_str = `${chars_remaining} characters left`;
+		}
+
 		return (
 			<div className={classes.section_comment}>
 				<TextField
@@ -1614,13 +1754,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 					label="Optional comment (encrypted)"
 					margin="normal"
 					multiline={true}
+					disabled={is_disabled}
 					onChange={this.commentTextFieldChanged}
 					className={classes.comment}
 					inputProps={{
-						maxLength: 200,
+						maxLength: COMMENT_MAX_LENGTH,
 					}}
 				/>
-				<Typography align="right" variant="caption">200 characters left</Typography>
+				<Typography align="right" variant="caption">{chars_remaining_str}</Typography>
 			</div>
 		);
 	}
@@ -1629,10 +1770,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const state = this.state;
 		const {classes} = this.props;
 
-		const is_disabled = (state.file_list.length == 0) || state.is_uploading;
-		log.debug("is_disabled: "+ is_disabled);
-		log.debug("state.file_list.length: "+ state.file_list.length);
-		log.debug("state.is_uploading: "+ state.is_uploading);
+		const is_disabled =
+			state.pubkey_tampering_detected ||
+			state.file_list.length == 0     ||
+			state.is_uploading;
 
 		return (
 			<div className={classes.section_sendButton}>
@@ -1640,6 +1781,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					variant="contained"
 					color="primary"
 					disabled={is_disabled}
+					onClick={this.onSend}
 				>Send Securely</Button>
 			</div>
 		);
