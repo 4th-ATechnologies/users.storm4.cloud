@@ -35,7 +35,7 @@ import {
 	StyleRulesCallback,
 	Theme,
 	withStyles,
-	WithStyles 
+	WithStyles,
 } from '@material-ui/core/styles';
 
 import Avatar from '@material-ui/core/Avatar';
@@ -46,6 +46,7 @@ import ExpansionPanel from '@material-ui/core/ExpansionPanel';
 import ExpansionPanelSummary from '@material-ui/core/ExpansionPanelSummary';
 import ExpansionPanelDetails from '@material-ui/core/ExpansionPanelDetails';
 import IconButton from '@material-ui/core/IconButton';
+import LinearProgress from '@material-ui/core/LinearProgress';
 import ListItemIcon from '@material-ui/core/ListItemIcon';
 import ListItemText from '@material-ui/core/ListItemText';
 import Menu from '@material-ui/core/Menu';
@@ -231,21 +232,35 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	},
 	table: {
 		maxWidth: 600,
-	//	backgroundColor: 'pink'
+		[theme.breakpoints.up('sm')]: {
+			minWidth: 600
+		},
+		[theme.breakpoints.only('xs')]: {
+			minWidth: '100%',
+			width: '100%',
+			tableLayout: 'fixed',
+		}
 	},
-	tableRow_fileName: {
+	tableRow: {
+		backgroundColor: theme.palette.background.paper,
+	},
+	tableCell_right: {
+		width: 150
+	},
+	tableCell_div_fileName: {
 		display: 'flex',
-		flexDirection: 'row',
+		flexDirection: 'column',
 		flexWrap: 'nowrap',
 		justifyContent: 'flex-start',
-		alignItems: 'center',
+		alignItems: 'flex-start',
 		alignContent: 'center',
-		marginLeft: theme.spacing.unit,
+		marginLeft: theme.spacing.unit * 3, // set to line up with ExpansionPanel
 		marginRight: 0, 
 		marginTop: 2,
-		marginBottom: 2
+		marginBottom: 2,
+	//	backgroundColor: 'pink'
 	},
-	tableRow_containerButtons: {
+	tableCell_div_containerButtons: {
 		display: 'flex',
 		flexDirection: 'row',
 		flexWrap: 'nowrap',
@@ -253,24 +268,41 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		alignItems: 'center',
 		alignContent: 'center',
 		marginLeft: theme.spacing.unit * 2,
-		marginRight: theme.spacing.unit,
+		marginRight: theme.spacing.unit * 2, // set to line up with ExpansionPanel
 		marginTop: 2,
 		marginBottom: 2
 	},
-	trashIconButton: {
+	fileSizeText: {
+		marginRight: theme.spacing.unit
+	},
+	tableCell_buttonRight: {
 		width: 32,
 		height: 32,
-		marginLeft: theme.spacing.unit
 	},
-	trashIcon: {
+	tableCell_buttonRight_icon: {
 		width: 22,
 		height: 22
+	},
+	tableCell_iconRight: {
+		width: 22,
+		height: 22,
+		marginLeft: 5,
+		marginRight: 5
+	},
+	tableCell_circularProgress: {
+		marginLeft: 8,
+		marginRight: 8
+	},
+	tableCell_linearProgress: {
+		width: '100%',
+		height: 2,
+		marginTop: 2
 	},
 	comment: {
 		width: 300
 	},
 	section_sendButton: {
-		marginTop: theme.spacing.unit * 2
+		marginTop: theme.spacing.unit * 3
 	}
 });
 
@@ -324,8 +356,10 @@ interface ISendState {
 
 	// Uploading
 	// 
-	is_uploading : boolean,
-	upload_index : number
+	is_uploading    : boolean,
+	upload_index    : number,
+	upload_progress : number,
+	upload_err_msg  : string|null
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -360,8 +394,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		file_list           : [],
 		commentTextFieldStr : "",
 
-		is_uploading : false,
-		upload_index : 0
+		is_uploading    : false,
+		upload_index    : 0,
+		upload_progress : 0,
+		upload_err_msg  : null
 	}
 
 	protected isProbablyMobile = (): boolean => {
@@ -923,7 +959,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadFile_singlePart = (file: ImageFile)=> {
 		log.debug("uploadFile_singlePart()");
 
-		function _readFile(): void
+		const _readFile = (): void =>
 		{
 			log.debug("_readFile()");
 
@@ -942,12 +978,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			file_stream.readAsArrayBuffer(file);
 		}
 
-		function _fetchCredentials(
+		const _fetchCredentials = (
 			state: {
 				file        : ImageFile,
 				file_buffer : ArrayBuffer
 			}
-		): void
+		): void =>
 		{
 			log.debug("_fetchCredentials()");
 
@@ -962,13 +998,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
-		function _performUpload(
+		const _performUpload = (
 			state: {
 				file        : ImageFile,
 				file_buffer : ArrayBuffer,
 				credentials : AWSCredentials
 			}
-		): void
+		): void =>
 		{
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -985,24 +1021,50 @@ class Send extends React.Component<ISendProps, ISendState> {
 			upload.on("httpUploadProgress", (progress)=> {
 
 				log.debug(`progress: loaded(${progress.loaded}) total(${progress.total})`);
+
+				const upload_progress = Math.round(100 * (progress.loaded / progress.total));
+				this.setState({
+					upload_progress
+				});
 			});
 
 			upload.send((err, data)=> {
 
-				if (err) {
+				if (err)
+				{
 					log.err("upload err: "+ err);
+					_fail("Failed to send file. Check internet connection.")
 				}
-				else {
-					log.debug("upload data: "+ data);
+				else
+				{
+					_succeed();
 				}
 			});
+		};
+
+		const _succeed = (): void => {
+			log.err("uploadFile_singlePart: SUCCESS: ");
+		/*
+			this.setState((current)=> {
+				
+				const next = {...current};
+				next.upload_index++;
+				next.upload_progress = 0;
+
+				return next;
+			});
+		*/
 		}
 
-		function _fail(err_msg: string)
+		const _fail = (
+			err_msg: string
+		): void =>
 		{
 			log.err("uploadFile_singlePart: err: "+ err_msg);
 
-			// Todo...
+			this.setState({
+				upload_err_msg: err_msg
+			});
 		}
 
 		this.setState({
@@ -1693,33 +1755,104 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const file_list = state.file_list;
 
+		// It actually looks better with the rendered empty table.
+		// I prefer the extra whitespace below the dropzone.
+		// 
+	//	if (file_list.length == 0) {
+	//		return (
+	//			<div/>
+	//		);
+	//	}
+
+		log.debug("state.upload_index: "+ state.upload_index);
+
 		return (
 			<div className={classes.section_fileList}>
 				<Table className={classes.table}>
 					<TableBody>
 						{file_list.map((file, idx)=> {
 
-							const onClick = this.deleteFile.bind(this, idx);
+							const is_uploaded = (state.upload_index > idx);
+						//	const is_uploading_any_file = state.is_uploading;
+							const is_uploading_this_file = state.is_uploading && (state.upload_index == idx);
 
-							return (
-								<TableRow key={`${idx}`}>
-									<TableCell padding="none">
-										<div className={classes.tableRow_fileName}>
-											<Typography className={classes.wrap}>{file.name}</Typography>
-										</div>
-									</TableCell>
-									<TableCell padding="none">
-										<div className={classes.tableRow_containerButtons}>
-											<Typography>{filesize(file.size)}</Typography>
-											<Tooltip title="Remove file from list">
-												<IconButton onClick={onClick} className={classes.trashIconButton}>
-													<DeleteIcon className={classes.trashIcon}/>
-												</IconButton>
-											</Tooltip>
-										</div>
-									</TableCell>
-								</TableRow>
-							);
+							if (is_uploaded)
+							{
+								return (
+									<TableRow key={`${idx}`} className={classes.tableRow}>
+										<TableCell padding="none">
+											<div className={classes.tableCell_div_fileName}>
+												<Typography className={classes.wrap}>{file.name}</Typography>
+											</div>
+										</TableCell>
+										<TableCell padding="none" className={classes.tableCell_right}>
+											<div className={classes.tableCell_div_containerButtons}>
+												<Typography className={classes.fileSizeText}>
+													{filesize(file.size)}
+												</Typography>
+												<CheckCircleIcon
+													className={classes.tableCell_iconRight}
+													nativeColor='green' />
+											</div>
+										</TableCell>
+									</TableRow>
+								);	
+							}
+							else if (is_uploading_this_file)
+							{
+								return (
+									<TableRow key={`${idx}`} className={classes.tableRow}>
+										<TableCell padding="none">
+											<div className={classes.tableCell_div_fileName}>
+												<Typography className={classes.wrap}>{file.name}</Typography>
+												<LinearProgress
+													className={classes.tableCell_linearProgress}
+													variant="determinate"
+													value={state.upload_progress}
+												/>
+											</div>
+										</TableCell>
+										<TableCell padding="none" className={classes.tableCell_right}>
+											<div className={classes.tableCell_div_containerButtons}>
+												<Typography className={classes.fileSizeText}>
+													{filesize(file.size)}
+												</Typography>
+												<CircularProgress
+													className={classes.tableCell_circularProgress}
+													color="secondary"
+													size={16}
+												/>
+											</div>
+										</TableCell>
+									</TableRow>
+								);
+							}
+							else
+							{
+								const onClick = this.deleteFile.bind(this, idx);
+
+								return (
+									<TableRow key={`${idx}`} className={classes.tableRow}>
+										<TableCell padding="none">
+											<div className={classes.tableCell_div_fileName}>
+												<Typography className={classes.wrap}>{file.name}</Typography>
+											</div>
+										</TableCell>
+										<TableCell padding="none" className={classes.tableCell_right}>
+											<div className={classes.tableCell_div_containerButtons}>
+												<Typography className={classes.fileSizeText}>
+													{filesize(file.size)}
+												</Typography>
+												<Tooltip title="Remove file from list">
+													<IconButton onClick={onClick} className={classes.tableCell_buttonRight}>
+														<DeleteIcon className={classes.tableCell_buttonRight_icon}/>
+													</IconButton>
+												</Tooltip>
+											</div>
+										</TableCell>
+									</TableRow>
+								);
+							}
 						})}
 					</TableBody>
 				</Table>
