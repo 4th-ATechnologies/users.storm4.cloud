@@ -4,6 +4,7 @@ import * as merkle_tree_gen from 'merkle-tree-gen';
 import * as queryString from 'query-string';
 import * as React from 'react';
 import * as S3 from 'aws-sdk/clients/s3';
+import * as base64 from 'base64-js'
 
 import Dropzone, {ImageFile} from 'react-dropzone'
 import ReactImageFallback from 'react-image-fallback';
@@ -11,6 +12,7 @@ import ReactImageFallback from 'react-image-fallback';
 import {Credentials as AWSCredentials} from 'aws-sdk';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
+import {encode as utf8_encode} from 'utf8';
 
 import * as credentials_helper from '../util/Credentials';
 import * as util from '../util/Util';
@@ -26,6 +28,8 @@ import {
 	PubKey,
 	MerkleTreeFile,
 	MerkleTreeFileValue,
+	S4Rcrd,
+	S4Rcrd_Metadata,
 } from '../models/models'
 
 // Material UI
@@ -65,6 +69,7 @@ import DeleteIcon from '@material-ui/icons/Delete';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import ReportProblemIcon from '@material-ui/icons/ReportProblem';
+import { stat } from 'fs';
 
 
 const log = Logger.Make('debug', 'Send');
@@ -174,6 +179,14 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	gray: {
 		color: theme.palette.text.secondary
 	},
+	monospaced: {
+		// IBM Plex Mono - Because I'm a fan
+		// Inconsolata   - Popular with programmers
+		// Consolas      - Microsoft
+		// Menlo         - Apple
+
+		fontFamily: '"IBM Plex Mono", "Inconsolata", "Consolas", "Menlo", "Courier New", monospace',
+	},
 	blockquote: {
 		marginLeft  : theme.spacing.unit * 2,
 		fontFamily  : 'Consolas, "Times New Roman", Verdana',
@@ -227,6 +240,37 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginTop: theme.spacing.unit,
 		marginBottom: theme.spacing.unit
 	},
+	section_uploadInfo: {
+		marginTop: theme.spacing.unit * 4, // <= should match section_fileSelection
+		width: 350,
+		height: 200,
+		borderWidth: 2,
+		borderColor: '#666',
+		borderStyle: 'dashed',
+		borderRadius: 5
+	},
+	uploadInfo_description_container: {
+		display: 'flex',
+		flexDirection: 'column',
+		flexWrap: 'nowrap',
+		justifyContent: 'flex-start',
+		alignItems: 'center',
+		alignContent: 'center',
+		height: 200,
+		margin: 0,
+		paddingTop: theme.spacing.unit * 2,
+		paddingBottom: theme.spacing.unit,
+		paddingLeft: theme.spacing.unit,
+		paddingRight: theme.spacing.unit
+	},
+	uploadInfo_text: {
+		flexBasis: 'auto'
+	},
+	uploadInfo_file_progress: {
+		flexBasis: 'auto',
+		marginTop: theme.spacing.unit,
+		marginBottom: theme.spacing.unit
+	},
 	section_fileList: {
 		marginTop: theme.spacing.unit * 4
 	},
@@ -247,7 +291,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	tableCell_right: {
 		width: 150
 	},
-	tableCell_div_fileName: {
+	tableCell_div_container_fileName: {
 		display: 'flex',
 		flexDirection: 'column',
 		flexWrap: 'nowrap',
@@ -260,7 +304,16 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginBottom: 2,
 	//	backgroundColor: 'pink'
 	},
-	tableCell_div_containerButtons: {
+	fileNameWithProgress: {
+		wordWrap: 'break-word',
+		wordBreak: 'break-all',
+
+		// This does what we want, but doesn't seem to work
+		overflowWrap: 'break-word',
+
+		paddingTop: 4 // to keep centered; see: tableCell_linearProgress
+	},
+	tableCell_div_container_buttons: {
 		display: 'flex',
 		flexDirection: 'row',
 		flexWrap: 'nowrap',
@@ -305,6 +358,12 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginTop: theme.spacing.unit * 3
 	}
 });
+
+interface UploadState {
+	encryption_key    : Uint8Array,
+	has_uploaded_rcrd : boolean,
+	is_mulitpart      : boolean,
+}
 
 interface ISendProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
 	user_id     : string,
@@ -352,14 +411,18 @@ interface ISendState {
 	// Files & comment
 	// 
 	file_list           : ImageFile[]
+	rand_list           : string[],
 	commentTextFieldStr : string,
 
 	// Uploading
 	// 
-	is_uploading    : boolean,
-	upload_index    : number,
-	upload_progress : number,
-	upload_err_msg  : string|null
+	is_uploading      : boolean,
+	upload_index      : number,
+	upload_progress   : number,
+	upload_err_msg    : string|null,
+	upload_state      : UploadState|null,
+	upload_temp_id    : string|null,
+	burn_date         : number|null
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -392,12 +455,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 		userIdentsMenuOpen   : false,
 
 		file_list           : [],
+		rand_list           : [],
 		commentTextFieldStr : "",
 
-		is_uploading    : false,
-		upload_index    : 0,
-		upload_progress : 0,
-		upload_err_msg  : null
+		is_uploading      : false,
+		upload_index      : 0,
+		upload_progress   : 0,
+		upload_err_msg    : null,
+		upload_state      : null,
+		upload_temp_id    : null,
+		burn_date         : null
 	}
 
 	protected isProbablyMobile = (): boolean => {
@@ -935,53 +1002,141 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected onSend = (): void => {
 		log.debug("onSend()");
 
-		this.uploadNextFile();
-	}
-
-	protected uploadNextFile = (): void => {
-		log.debug("uploadNextFile()");
-
 		if (this.state.is_uploading) {
 			log.debug("Ignoring duplicate click");
 			return;
 		}
 
-		const file = this.state.file_list[this.state.upload_index];
-
-		if (file.size < (1024 * 1024 * 10)) {
-			this.uploadFile_singlePart(file);
-		}
-		else {
-			this.uploadFile_singlePart(file);
-		}
+		this.uploadNext();
 	}
 
-	protected uploadFile_singlePart = (file: ImageFile)=> {
-		log.debug("uploadFile_singlePart()");
+	protected uploadNext = (): void => {
+		log.debug("uploadNext()");
 
-		const _readFile = (): void =>
+		const state = this.state;
+
+		// Initialize rand_list[] (if needed)
+		if (state.rand_list.length < state.file_list.length)
 		{
-			log.debug("_readFile()");
+			state.rand_list = [];
+			for (const ignore of state.file_list) {
+				state.rand_list.push(util.randomFileName());
+			}
+		}
 
-			const file_stream = new FileReader();
-			file_stream.addEventListener("loadend", ()=>{
+		// Initialize burn_data (if needed)
+		if (state.burn_date == null) {
+			state.burn_date = Date.now() + (1000 * 60 * 60 * 24 * 30);
+		}
 
-				const file_buffer = file_stream.result as ArrayBuffer;
-				if (file_buffer == null) {
-					_fail("Unable to read file: "+ file.name);
+		// Initialize upload_state (if needed)
+		if (state.upload_state == null)
+		{
+			const crypto: Crypto = window.crypto || (window as any).msCrypto;
+
+			const encryption_key = new Uint8Array(512);
+			crypto.getRandomValues(encryption_key);
+
+			state.upload_state = {
+				encryption_key,
+				has_uploaded_rcrd : false,
+				is_mulitpart      : false
+			};
+		}
+
+		if (state.upload_temp_id == null) {
+			state.upload_temp_id = util.randomFileName().substring(0, 4);
+		}
+
+		const file = state.file_list[state.upload_index];
+		let rand = state.rand_list[state.upload_index];
+
+		const burn_date = state.burn_date;
+		const upload_state = state.upload_state;
+
+		rand = `${state.upload_temp_id}_${rand}`
+
+		this.setState({
+			is_uploading: true
+
+		}, ()=> {
+
+			if (!upload_state.has_uploaded_rcrd)
+			{
+				this.uploadRcrd({file, rand, burn_date, upload_state});
+			}
+			else
+			{
+				if (upload_state.is_mulitpart) {
+					this.uploadFile_singlePart({file, rand, upload_state});
 				}
 				else {
-					_fetchCredentials({file, file_buffer})
+					this.uploadFile_singlePart({file, rand, upload_state});
 				}
-			});
+			}
+		});
+	}
 
-			file_stream.readAsArrayBuffer(file);
+	protected uploadRcrd = (
+		in_state: {
+			file         : ImageFile,
+			rand         : string,
+			burn_date    : number,
+			upload_state : UploadState
+		}
+	): void =>
+	{
+		log.debug("uploadRcrd()");
+
+		const {file, rand, burn_date, upload_state} = in_state;
+
+		const _generateRcrdData = (): void => {
+			log.debug("_generateRcrdData()");
+
+			const json: S4Rcrd = {
+				version  : 3,
+				keys     : {},
+				burnDate : burn_date
+			};
+	
+			{ // metadata
+	
+				const metadata_cleartext: S4Rcrd_Metadata = {
+					filename : file.name
+				};
+	
+				const metadata_json_cleartext = JSON.stringify(metadata_cleartext, null, 0);
+				// 
+				// Todo: encrypt metadata
+				// Need: Threeefish 512 support in JS
+				//
+				json.metadata = metadata_json_cleartext;
+			}
+			{ // key
+	
+				const key_id = `UID:${this.props.user_id}`;
+	
+				// 
+				// Todo: encrypt key
+				// Need: ECC 41417 support in JS
+				//
+				const key_cleartext_b64 = base64.fromByteArray(upload_state.encryption_key);
+	
+				json.keys[key_id] = {
+					perms : "rws",
+					key   : key_cleartext_b64
+				};
+			}
+
+			const rcrd_str = JSON.stringify(json, null, 0);
+
+			// Next step
+			_fetchCredentials({rcrd_str});
 		}
 
 		const _fetchCredentials = (
 			state: {
-				file        : ImageFile,
-				file_buffer : ArrayBuffer
+				rcrd_str : string
 			}
 		): void =>
 		{
@@ -1000,12 +1155,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performUpload = (
 			state: {
-				file        : ImageFile,
-				file_buffer : ArrayBuffer,
+				rcrd_str    : string,
 				credentials : AWSCredentials
 			}
 		): void =>
 		{
+			log.debug("_uploadRcrdData()");
+
 			const s3 = new S3({
 				credentials : state.credentials,
 				region      : 'us-west-2'
@@ -1013,7 +1169,124 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const upload = s3.upload({
 				Bucket        : 'cloud.storm4.test',
-				Key           : `staging/${file.name}`,
+				Key           : `staging/${rand}_${file.name}.rcrd`,
+				Body          : state.rcrd_str
+			});
+
+			upload.send((err, data)=> {
+
+				if (err)
+				{
+					log.err("s3.upload.send(): err: "+ err);
+
+					_fail("Failed to send file. Check internet connection.")
+				}
+				else
+				{
+					_succeed();
+				}
+			});
+		}
+
+		const _succeed = (
+		): void =>
+		{
+			log.err("uploadRcrd: SUCCESS: ");
+
+			const new_upload_state = _.cloneDeep(upload_state);
+			new_upload_state.has_uploaded_rcrd = true;
+
+			this.setState({
+				upload_state: new_upload_state
+				
+			}, ()=> {
+
+				this.uploadNext();
+			});
+		}
+
+		const _fail = (
+			err_msg: string
+		): void =>
+		{
+			log.err("uploadRcrd: err: "+ err_msg);
+
+			this.setState({
+				upload_err_msg: err_msg
+			});
+		}
+
+		_generateRcrdData();
+	}
+
+	protected uploadFile_singlePart = (
+		in_state: {
+			file         : ImageFile,
+			rand         : string,
+			upload_state : UploadState
+		}
+	): void =>
+	{
+		log.debug("uploadFile_singlePart()");
+
+		const {file, rand, upload_state} = in_state;
+
+		const _readFile = (
+		): void =>
+		{
+			log.debug("_readFile()");
+
+			const file_stream = new FileReader();
+			file_stream.addEventListener("loadend", ()=>{
+
+				const file_buffer = file_stream.result as ArrayBuffer;
+				if (file_buffer == null) {
+					_fail("Unable to read file: "+ file.name);
+				}
+				else {
+					_fetchCredentials({file_buffer})
+				}
+			});
+
+			file_stream.readAsArrayBuffer(file);
+		}
+
+		const _fetchCredentials = (
+			state: {
+				file_buffer: ArrayBuffer
+			}
+		): void =>
+		{
+			log.debug("_fetchCredentials()");
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					_fail("Unable to connect to server. Check internet connection.");
+				}
+			});
+		}
+
+		const _performUpload = (
+			state: {
+				file_buffer : ArrayBuffer,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			log.debug("_performUpload()");
+
+			const s3 = new S3({
+				credentials : state.credentials,
+				region      : 'us-west-2'
+			});
+
+			const upload = s3.upload({
+				Bucket        : 'cloud.storm4.test',
+				Key           : `staging/${rand}_${file.name}.data`,
 				Body          : state.file_buffer,
 				ContentLength : state.file_buffer.byteLength
 			});
@@ -1042,18 +1315,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		};
 
-		const _succeed = (): void => {
+		const _succeed = (
+		): void =>
+		{
 			log.err("uploadFile_singlePart: SUCCESS: ");
-		/*
+		
 			this.setState((current)=> {
 				
 				const next = {...current};
 				next.upload_index++;
 				next.upload_progress = 0;
+				next.upload_state = null;
 
 				return next;
 			});
-		*/
 		}
 
 		const _fail = (
@@ -1067,9 +1342,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
-		this.setState({
-			is_uploading: true
-		});
 		_readFile();
 	}
 
@@ -1749,6 +2021,123 @@ class Send extends React.Component<ISendProps, ISendState> {
 		);
 	}
 
+	public renderUploadInfo(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		const step_count = (state.file_list.length * 2) + 1;
+		let step_index = 1 + (state.upload_index * 2);
+		if (state.upload_state && state.upload_state.has_uploaded_rcrd) {
+			step_index++;
+		}
+
+		const info_step = (
+			<Typography
+				align="center"
+				variant="subheading"
+				className={classes.uploadInfo_text}
+			>
+				{`Step ${step_index} of ${step_count}`}
+			</Typography>
+		);
+
+		let is_uploading_rcrd = false;
+		let is_uploading_data = false;
+		let is_uploading_msg = false;
+
+		if (state.upload_index >= state.file_list.length) {
+			is_uploading_msg = true;
+		}
+		else
+		{
+			if (state.upload_state && state.upload_state.has_uploaded_rcrd) {
+				is_uploading_data = true;
+			}
+			else {
+				is_uploading_rcrd = true;
+			}
+		}
+
+		let info_what: React.ReactNode;
+		if (is_uploading_rcrd)
+		{
+			info_what = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text}
+				>
+					Uploading encrypted metadata...
+				</Typography>
+			);
+		}
+		else if (is_uploading_data)
+		{
+			info_what = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text}
+				>
+					Uploading encrypted file...
+				</Typography>
+			);
+		}
+		else
+		{
+			info_what = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text}
+				>
+					Uploading encrypted message...
+				</Typography>
+			);
+		}
+
+		let info_file: React.ReactNode;
+		if (is_uploading_data)
+		{
+			let percent = "0";
+			if (state.upload_progress) {
+				percent = state.upload_progress.toString();
+			}
+			percent = _.padStart(percent, 3, '\u00A0');
+
+			info_file = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_file_progress}
+				>
+					File progress:<span className={classes.monospaced}>{percent}</span><span className={classes.gray}>%</span>
+				</Typography>
+			);
+		}
+		else
+		{
+			info_file = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_file_progress}
+				>&nbsp;
+				</Typography>
+			);
+		}
+
+		return (
+			<div className={classes.section_uploadInfo}>
+				<div className={classes.uploadInfo_description_container}>
+					{info_step}
+					{info_what}
+					{info_file}
+				</div>
+			</div>
+		);
+	}
+
 	public renderFileList(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
@@ -1774,19 +2163,21 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 							const is_uploaded = (state.upload_index > idx);
 						//	const is_uploading_any_file = state.is_uploading;
-							const is_uploading_this_file = state.is_uploading && (state.upload_index == idx);
+							let is_uploading_this_file = state.is_uploading && (state.upload_index == idx);
+
+							is_uploading_this_file = (idx == 0);
 
 							if (is_uploaded)
 							{
 								return (
 									<TableRow key={`${idx}`} className={classes.tableRow}>
 										<TableCell padding="none">
-											<div className={classes.tableCell_div_fileName}>
+											<div className={classes.tableCell_div_container_fileName}>
 												<Typography className={classes.wrap}>{file.name}</Typography>
 											</div>
 										</TableCell>
 										<TableCell padding="none" className={classes.tableCell_right}>
-											<div className={classes.tableCell_div_containerButtons}>
+											<div className={classes.tableCell_div_container_buttons}>
 												<Typography className={classes.fileSizeText}>
 													{filesize(file.size)}
 												</Typography>
@@ -1800,20 +2191,25 @@ class Send extends React.Component<ISendProps, ISendState> {
 							}
 							else if (is_uploading_this_file)
 							{
+							//	const progress = state.upload_progress || 0;
+								const progress = 30;
+
 								return (
 									<TableRow key={`${idx}`} className={classes.tableRow}>
 										<TableCell padding="none">
-											<div className={classes.tableCell_div_fileName}>
-												<Typography className={classes.wrap}>{file.name}</Typography>
+											<div className={classes.tableCell_div_container_fileName}>
+												<Typography className={classes.fileNameWithProgress}>
+													{file.name}
+												</Typography>
 												<LinearProgress
 													className={classes.tableCell_linearProgress}
 													variant="determinate"
-													value={state.upload_progress}
+													value={progress}
 												/>
 											</div>
 										</TableCell>
 										<TableCell padding="none" className={classes.tableCell_right}>
-											<div className={classes.tableCell_div_containerButtons}>
+											<div className={classes.tableCell_div_container_buttons}>
 												<Typography className={classes.fileSizeText}>
 													{filesize(file.size)}
 												</Typography>
@@ -1834,12 +2230,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 								return (
 									<TableRow key={`${idx}`} className={classes.tableRow}>
 										<TableCell padding="none">
-											<div className={classes.tableCell_div_fileName}>
+											<div className={classes.tableCell_div_container_fileName}>
 												<Typography className={classes.wrap}>{file.name}</Typography>
 											</div>
 										</TableCell>
 										<TableCell padding="none" className={classes.tableCell_right}>
-											<div className={classes.tableCell_div_containerButtons}>
+											<div className={classes.tableCell_div_container_buttons}>
 												<Typography className={classes.fileSizeText}>
 													{filesize(file.size)}
 												</Typography>
@@ -1884,7 +2280,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			<div className={classes.section_comment}>
 				<TextField
 					id="comment"
-					label="Optional comment (encrypted)"
+					label="optional comment (will also be encrypted)"
 					margin="normal"
 					multiline={true}
 					disabled={is_disabled}
@@ -1939,7 +2335,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const section_expansionPanel1 = this.renderExpansionPanel1();
 			const section_expansionPanel2 = this.renderExpansionPanel2();
 			const section_expansionPanel3 = this.renderExpansionPanel3();
-			const section_fileSelection   = this.renderFileSelection();
+			const section_selectionOrInfo = state.is_uploading
+														 ? this.renderUploadInfo()
+			                                  :  this.renderFileSelection();
 			const section_fileList        = this.renderFileList();
 			const section_comment         = this.renderComment();
 			const section_button          = this.renderSendButton();
@@ -1952,7 +2350,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 						{section_expansionPanel2}
 						{section_expansionPanel3}
 					</div>
-					{section_fileSelection}
+					{section_selectionOrInfo}
 					{section_fileList}
 					{section_comment}
 					{section_button}

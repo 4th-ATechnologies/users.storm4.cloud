@@ -72,3 +72,52 @@ export interface MerkleTreeFile {
 		[user_id: string]: number|undefined
 	}
 }
+
+export interface S4Rcrd {
+	version : 3,
+
+	// The `fileID` is set automatically by the server.
+	// It will be a UUIDv4, with the dashes removed.
+	//
+	fileID ?: string,
+
+	// The `sender` is set automatically by the server.
+	// (Only applies to messages.)
+	// 
+	sender?: string,
+
+	keys: {
+		[identifier: string]: S4Rcrd_Key|undefined
+	},
+
+	// 1) Create your metadata as a JSON dictionary
+	// 2) Encrypt the metadata using the file encryption key
+	// 3) Base64 encode the encrypted data
+	// 4) Set the base64 string as this value
+	// 
+	metadata?: string,
+
+	// You must have exactly 1 of either:
+	// - metadata
+	// - data
+	// 
+	data?: string,
+
+	// Date, expressed as milliseconds since epoch
+	burnDate?: number
+}
+
+export interface S4Rcrd_Key {
+	// Just set to "rws" for now ?
+	perms: string,
+
+	// 1) Encrypt the file encryption key using the user's public key
+	// 2) Base64 encode the result
+	// 3) Set the base64 string as this value
+	// 
+	key: string
+}
+
+export interface S4Rcrd_Metadata {
+	filename : string
+}

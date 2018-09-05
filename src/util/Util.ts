@@ -324,6 +324,18 @@ export function findSelectedIdentity(
 	return result;
 }
 
+/**
+ * The `idh` is a query parameter that is meant to uniquely map
+ * to a particular user identity. The idea is to NOT use array
+ * indexes, as these could change over time. And not to fully
+ * spell out the identity information because:
+ * 
+ * - it's potentially long
+ * - it might need to be urlEncoded
+ * - it leaks information
+ * 
+ * So a hash is used insted.
+**/
 export function idhForIdentity(identity: Auth0Identity): string
 {
 	const auth0_id = `${identity.provider}|${identity.user_id}`;
@@ -332,4 +344,20 @@ export function idhForIdentity(identity: Auth0Identity): string
 	const subhash = hash.substring(0, 8);
 
 	return subhash;
+}
+
+export function randomFileName(): string
+{
+	const alphabet = "ybndrfg8ejkmcpqxot1uwisza345h769";
+	let result = "";
+
+	for (let i = 0; i < 32; i++)
+	{
+		const random = Math.random();
+		const index = Math.round(random * 32);
+
+		result += alphabet[index];
+	}
+
+	return result;
 }
