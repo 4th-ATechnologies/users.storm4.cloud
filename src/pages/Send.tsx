@@ -30,6 +30,7 @@ import {
 	MerkleTreeFileValue,
 	S4Rcrd,
 	S4Rcrd_Metadata,
+	S4Rcrd_Data_Message,
 } from '../models/models'
 
 // Material UI
@@ -69,14 +70,12 @@ import DeleteIcon from '@material-ui/icons/Delete';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import ReportProblemIcon from '@material-ui/icons/ReportProblem';
-import { stat } from 'fs';
 
 
 const log = Logger.Make('debug', 'Send');
 
 const AVATAR_SIZE = 96;
 const COMMENT_MAX_LENGTH = 200;
-const HASH_TYPE_ID = "0"; // result for hashTypeID("sha256")
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
@@ -311,7 +310,18 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		// This does what we want, but doesn't seem to work
 		overflowWrap: 'break-word',
 
-		paddingTop: 4 // to keep centered; see: tableCell_linearProgress
+		paddingTop: 4,
+		paddingBottom: 0 // <= space for progress bar
+	},
+	fileNameWithoutProgress: {
+		wordWrap: 'break-word',
+		wordBreak: 'break-all',
+
+		// This does what we want, but doesn't seem to work
+		overflowWrap: 'break-word',
+
+		paddingTop: 4,
+		paddingBottom: 4 // <= empty space replaces progress bar
 	},
 	tableCell_div_container_buttons: {
 		display: 'flex',
@@ -359,10 +369,25 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	}
 });
 
+interface UploadState_MultipartInfo {
+	// Todo...
+}
+
+interface UploadState_File {
+	encryption_key     : Uint8Array,
+	random_filename    : string,
+	request_id_rcrd    : string,
+	request_id_data    : string,
+	cloud_path         : string,
+	cloud_id          ?: string,
+	has_uploaded_rcrd  : boolean,
+	is_mulitpart       : boolean,
+}
+
 interface UploadState {
-	encryption_key    : Uint8Array,
-	has_uploaded_rcrd : boolean,
-	is_mulitpart      : boolean,
+	upload_id : string,
+	burn_date : number,
+	files     : UploadState_File[],
 }
 
 interface ISendProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
@@ -411,7 +436,6 @@ interface ISendState {
 	// Files & comment
 	// 
 	file_list           : ImageFile[]
-	rand_list           : string[],
 	commentTextFieldStr : string,
 
 	// Uploading
@@ -421,8 +445,6 @@ interface ISendState {
 	upload_progress   : number,
 	upload_err_msg    : string|null,
 	upload_state      : UploadState|null,
-	upload_temp_id    : string|null,
-	burn_date         : number|null
 }
 
 class Send extends React.Component<ISendProps, ISendState> {
@@ -455,16 +477,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 		userIdentsMenuOpen   : false,
 
 		file_list           : [],
-		rand_list           : [],
 		commentTextFieldStr : "",
 
 		is_uploading      : false,
 		upload_index      : 0,
 		upload_progress   : 0,
 		upload_err_msg    : null,
-		upload_state      : null,
-		upload_temp_id    : null,
-		burn_date         : null
+		upload_state      : null
 	}
 
 	protected isProbablyMobile = (): boolean => {
@@ -1014,64 +1033,67 @@ class Send extends React.Component<ISendProps, ISendState> {
 		log.debug("uploadNext()");
 
 		const state = this.state;
-
-		// Initialize rand_list[] (if needed)
-		if (state.rand_list.length < state.file_list.length)
-		{
-			state.rand_list = [];
-			for (const ignore of state.file_list) {
-				state.rand_list.push(util.randomFileName());
-			}
-		}
-
-		// Initialize burn_data (if needed)
-		if (state.burn_date == null) {
-			state.burn_date = Date.now() + (1000 * 60 * 60 * 24 * 30);
-		}
+		const upload_index = state.upload_index;
 
 		// Initialize upload_state (if needed)
 		if (state.upload_state == null)
 		{
-			const crypto: Crypto = window.crypto || (window as any).msCrypto;
-
-			const encryption_key = new Uint8Array(512);
-			crypto.getRandomValues(encryption_key);
+			const upload_id = util.randomZBase32String(4);
+			const burn_date = Date.now() + (1000 * 60 * 60 * 24 * 30);
 
 			state.upload_state = {
-				encryption_key,
-				has_uploaded_rcrd : false,
-				is_mulitpart      : false
+				upload_id,
+				burn_date,
+				files: []
 			};
 		}
 
-		if (state.upload_temp_id == null) {
-			state.upload_temp_id = util.randomFileName().substring(0, 4);
-		}
-
-		const file = state.file_list[state.upload_index];
-		let rand = state.rand_list[state.upload_index];
-
-		const burn_date = state.burn_date;
 		const upload_state = state.upload_state;
 
-		rand = `${state.upload_temp_id}_${rand}`
+		// Initialize file_state.file[i] (if needed)
+		if (upload_index >= state.upload_state.files.length)
+		{
+			const file = state.file_list[upload_index];
+
+			const encryption_key = util.randomEncryptionKey();
+			const random_filename = util.randomFileName();
+
+			const request_id_rcrd = util.randomHexString(16);
+			const request_id_data = util.randomHexString(16);
+
+			const cloud_path   = `com.4th-a.storm4/temp/random_filename`;
+
+			const file_state: UploadState_File = {
+				encryption_key,
+				random_filename,
+				request_id_rcrd,
+				request_id_data,
+				cloud_path,
+				has_uploaded_rcrd : false,
+				is_mulitpart      : false
+			};
+
+			state.upload_state.files.push(file_state);
+		}
 
 		this.setState({
 			is_uploading: true
 
 		}, ()=> {
 
-			if (!upload_state.has_uploaded_rcrd)
+			const upload_state_file = upload_state[upload_index];
+
+			if (!upload_state_file.has_uploaded_rcrd)
 			{
-				this.uploadRcrd({file, rand, burn_date, upload_state});
+				this.uploadRcrd({upload_state, upload_index});
 			}
 			else
 			{
-				if (upload_state.is_mulitpart) {
-					this.uploadFile_singlePart({file, rand, upload_state});
+				if (upload_state_file.is_mulitpart) {
+					this.uploadFile_singlePart({upload_state, upload_index});
 				}
 				else {
-					this.uploadFile_singlePart({file, rand, upload_state});
+					this.uploadFile_singlePart({upload_state, upload_index});
 				}
 			}
 		});
@@ -1079,16 +1101,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	protected uploadRcrd = (
 		in_state: {
-			file         : ImageFile,
-			rand         : string,
-			burn_date    : number,
-			upload_state : UploadState
+			upload_state : UploadState,
+			upload_index : number
 		}
 	): void =>
 	{
 		log.debug("uploadRcrd()");
 
-		const {file, rand, burn_date, upload_state} = in_state;
+		const {upload_state, upload_index} = in_state;
+
+		const file = this.state.file_list[upload_index];
+		const file_state = upload_state.files[upload_index];
 
 		const _generateRcrdData = (): void => {
 			log.debug("_generateRcrdData()");
@@ -1096,21 +1119,21 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const json: S4Rcrd = {
 				version  : 3,
 				keys     : {},
-				burnDate : burn_date
+				burnDate : upload_state.burn_date
 			};
 	
 			{ // metadata
 	
-				const metadata_cleartext: S4Rcrd_Metadata = {
+				const metadata_obj: S4Rcrd_Metadata = {
 					filename : file.name
 				};
 	
-				const metadata_json_cleartext = JSON.stringify(metadata_cleartext, null, 0);
+				const metadata_cleartext = JSON.stringify(metadata_obj, null, 0);
 				// 
 				// Todo: encrypt metadata
 				// Need: Threeefish 512 support in JS
 				//
-				json.metadata = metadata_json_cleartext;
+				json.metadata = metadata_cleartext;
 			}
 			{ // key
 	
@@ -1120,7 +1143,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				// Todo: encrypt key
 				// Need: ECC 41417 support in JS
 				//
-				const key_cleartext_b64 = base64.fromByteArray(upload_state.encryption_key);
+				const key_cleartext_b64 = base64.fromByteArray(file_state.encryption_key);
 	
 				json.keys[key_id] = {
 					perms : "rws",
@@ -1162,6 +1185,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug("_uploadRcrdData()");
 
+			const key = `staging/${upload_state.upload_id}_${file_state.random_filename}_${file.name}.rcrd`;
+
 			const s3 = new S3({
 				credentials : state.credentials,
 				region      : 'us-west-2'
@@ -1169,7 +1194,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const upload = s3.upload({
 				Bucket        : 'cloud.storm4.test',
-				Key           : `staging/${rand}_${file.name}.rcrd`,
+				Key           : key,
 				Body          : state.rcrd_str
 			});
 
@@ -1194,7 +1219,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			log.err("uploadRcrd: SUCCESS: ");
 
 			const new_upload_state = _.cloneDeep(upload_state);
-			new_upload_state.has_uploaded_rcrd = true;
+			new_upload_state.files[upload_index].has_uploaded_rcrd = true;
 
 			this.setState({
 				upload_state: new_upload_state
@@ -1221,15 +1246,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	protected uploadFile_singlePart = (
 		in_state: {
-			file         : ImageFile,
-			rand         : string,
-			upload_state : UploadState
+			upload_state : UploadState,
+			upload_index : number
 		}
 	): void =>
 	{
 		log.debug("uploadFile_singlePart()");
 
-		const {file, rand, upload_state} = in_state;
+		const {upload_state, upload_index} = in_state;
+
+		const file = this.state.file_list[upload_index];
+		const file_state = upload_state.files[upload_index];
 
 		const _readFile = (
 		): void =>
@@ -1279,6 +1306,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug("_performUpload()");
 
+			const key = `staging/${upload_state.upload_id}_${file_state.random_filename}_${file.name}.data`;
+
 			const s3 = new S3({
 				credentials : state.credentials,
 				region      : 'us-west-2'
@@ -1286,7 +1315,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const upload = s3.upload({
 				Bucket        : 'cloud.storm4.test',
-				Key           : `staging/${rand}_${file.name}.data`,
+				Key           : key,
 				Body          : state.file_buffer,
 				ContentLength : state.file_buffer.byteLength
 			});
@@ -1343,6 +1372,69 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		_readFile();
+	}
+
+	protected uploadMessage = (
+		in_state: {
+			upload_state : UploadState
+		}
+	): void =>
+	{
+		log.debug("uploadMessage()");
+
+		const {upload_state} = in_state;
+		const encryption_key = util.randomEncryptionKey();
+		
+		const _generateRcrdData = (): void => {
+			log.debug("_generateRcrdData()");
+
+			const json: S4Rcrd = {
+				version  : 3,
+				keys     : {},
+				burnDate : upload_state.burn_date
+			};
+	
+			{ // data
+	
+				const data_obj: S4Rcrd_Data_Message = {
+					version     : 1,
+					type        : "ephemeral",
+					attachments : []
+				};
+
+				for (const file_state of upload_state.files)
+				{
+
+				}
+	
+				const data_cleartext = JSON.stringify(data_obj, null, 0);
+				// 
+				// Todo: encrypt metadata
+				// Need: Threeefish 512 support in JS
+				//
+				json.data = data_cleartext;
+			}
+			{ // key
+	
+				const key_id = `UID:${this.props.user_id}`;
+	
+				// 
+				// Todo: encrypt key
+				// Need: ECC 41417 support in JS
+				//
+				const key_cleartext_b64 = base64.fromByteArray(file_state.encryption_key);
+	
+				json.keys[key_id] = {
+					perms : "rws",
+					key   : key_cleartext_b64
+				};
+			}
+
+			const rcrd_str = JSON.stringify(json, null, 0);
+
+			// Next step
+		//	_fetchCredentials({rcrd_str});
+		}
 	}
 
 	public renderUserProfile(): React.ReactNode|React.ReactFragment {
@@ -2025,9 +2117,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const state = this.state;
 		const {classes} = this.props;
 
+		const upload_state = state.upload_state;
+		const upload_index = state.upload_index;
+
+		let file_state: UploadState_File|null = null;
+		if (upload_state && upload_state.files.length > upload_index) {
+			file_state = upload_state.files[upload_index];
+		}
+
 		const step_count = (state.file_list.length * 2) + 1;
 		let step_index = 1 + (state.upload_index * 2);
-		if (state.upload_state && state.upload_state.has_uploaded_rcrd) {
+		if (file_state && file_state.has_uploaded_rcrd) {
 			step_index++;
 		}
 
@@ -2050,7 +2150,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 		else
 		{
-			if (state.upload_state && state.upload_state.has_uploaded_rcrd) {
+			if (file_state && file_state.has_uploaded_rcrd) {
 				is_uploading_data = true;
 			}
 			else {
@@ -2173,7 +2273,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 									<TableRow key={`${idx}`} className={classes.tableRow}>
 										<TableCell padding="none">
 											<div className={classes.tableCell_div_container_fileName}>
-												<Typography className={classes.wrap}>{file.name}</Typography>
+												<Typography className={classes.fileNameWithoutProgress}>
+													{file.name}
+												</Typography>
 											</div>
 										</TableCell>
 										<TableCell padding="none" className={classes.tableCell_right}>
@@ -2231,7 +2333,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 									<TableRow key={`${idx}`} className={classes.tableRow}>
 										<TableCell padding="none">
 											<div className={classes.tableCell_div_container_fileName}>
-												<Typography className={classes.wrap}>{file.name}</Typography>
+												<Typography className={classes.fileNameWithoutProgress}>
+													{file.name}
+												</Typography>
 											</div>
 										</TableCell>
 										<TableCell padding="none" className={classes.tableCell_right}>

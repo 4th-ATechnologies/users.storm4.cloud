@@ -346,15 +346,47 @@ export function idhForIdentity(identity: Auth0Identity): string
 	return subhash;
 }
 
+export function randomEncryptionKey(): Uint8Array
+{
+	const crypto: Crypto = window.crypto || (window as any).msCrypto;
+
+	const encryption_key = new Uint8Array(512);
+	crypto.getRandomValues(encryption_key);
+
+	return encryption_key;
+}
+
 export function randomFileName(): string
 {
+	return randomZBase32String(32);
+}
+
+export function randomZBase32String(length: number): string
+{
 	const alphabet = "ybndrfg8ejkmcpqxot1uwisza345h769";
+	return randomString(alphabet, length);
+}
+
+export function randomHexString(
+	length: number
+): string
+{
+	const alphabet = "0123456789ABCDEF";
+	return randomString(alphabet, length);
+}
+
+function randomString(
+	alphabet : string,
+	length   : number
+): string
+{
+	const alphabet_length = alphabet.length;
 	let result = "";
 
-	for (let i = 0; i < 32; i++)
+	for (let i = 0; i < length; i++)
 	{
 		const random = Math.random();
-		const index = Math.round(random * 32);
+		const index = Math.round(random * alphabet_length);
 
 		result += alphabet[index];
 	}

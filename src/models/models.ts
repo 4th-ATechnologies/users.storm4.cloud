@@ -121,3 +121,21 @@ export interface S4Rcrd_Key {
 export interface S4Rcrd_Metadata {
 	filename : string
 }
+
+export interface S4Rcrd_Data_Message {
+	version      : 1,
+	type         : "ephemeral",
+	message     ?: string,
+	attachments  : [string, string, string][] // see: S4Rcrd_Data_Attachment()
+}
+
+export function S4Rcrd_Data_Attachment(
+	options: {
+		cloudPath   : string,
+		cloudFileID : string,
+		filename    : string
+	}
+): [string, string, string]
+{
+	return [options.cloudPath, options.cloudFileID, options.filename];
+}
