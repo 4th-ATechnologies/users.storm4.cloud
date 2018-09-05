@@ -126,10 +126,10 @@ export interface S4Rcrd_Data_Message {
 	version      : 1,
 	type         : "ephemeral",
 	message     ?: string,
-	attachments  : [string, string, string][] // see: S4Rcrd_Data_Attachment()
+	attachments  : Array<[string, string, string]> // see: S4Rcrd_Data_Attachment()
 }
 
-export function S4Rcrd_Data_Attachment(
+export function make_attachment(
 	options: {
 		cloudPath   : string,
 		cloudFileID : string,

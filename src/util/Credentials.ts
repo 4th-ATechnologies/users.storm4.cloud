@@ -50,10 +50,7 @@ export function getCredentials(
 				secretAccessKey : cached_credentials.Credentials.SecretAccessKey,
 				sessionToken    : cached_credentials.Credentials.SessionToken
 			});
-
-			log.debug("result.expireTime: "+ result.expireTime);
 			result.expireTime = expire;
-			log.debug("result.expireTime: "+ result.expireTime);
 
 			setImmediate(()=> {
 				callback(null, result);
@@ -94,10 +91,7 @@ export function getCredentials(
 				secretAccessKey : cached_credentials.Credentials.SecretAccessKey,
 				sessionToken    : cached_credentials.Credentials.SessionToken
 			});
-
-			log.debug("result.expireTime: "+ result.expireTime);
 			result.expireTime = new Date(json.Credentials.Expiration);
-			log.debug("result.expireTime: "+ result.expireTime);
 
 			callback(null, result);
 		}

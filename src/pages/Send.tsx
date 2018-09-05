@@ -31,6 +31,7 @@ import {
 	S4Rcrd,
 	S4Rcrd_Metadata,
 	S4Rcrd_Data_Message,
+	make_attachment
 } from '../models/models'
 
 // Material UI
@@ -384,10 +385,19 @@ interface UploadState_File {
 	is_mulitpart       : boolean,
 }
 
+interface UploadState_Msg {
+	encryption_key     : Uint8Array,
+	random_filename    : string,
+	request_id_rcrd    : string,
+	has_uploaded_rcrd  : boolean,
+}
+
 interface UploadState {
-	upload_id : string,
-	burn_date : number,
-	files     : UploadState_File[],
+	upload_id    : string,
+	burn_date    : number,
+	done_polling : boolean,
+	files        : UploadState_File[],
+	msg          : UploadState_Msg|null
 }
 
 interface ISendProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
@@ -1033,67 +1043,115 @@ class Send extends React.Component<ISendProps, ISendState> {
 		log.debug("uploadNext()");
 
 		const state = this.state;
-		const upload_index = state.upload_index;
+		const {file_list, upload_index} = state;
 
-		// Initialize upload_state (if needed)
-		if (state.upload_state == null)
+		const old_upload_state = state.upload_state;
+		let upload_state: UploadState;
+
+		if (old_upload_state)
+		{
+			upload_state = _.cloneDeep(old_upload_state);
+		}
+		else
 		{
 			const upload_id = util.randomZBase32String(4);
 			const burn_date = Date.now() + (1000 * 60 * 60 * 24 * 30);
 
-			state.upload_state = {
+			upload_state = {
 				upload_id,
 				burn_date,
-				files: []
+				done_polling : false,
+				files        : [],
+				msg          : null
 			};
 		}
 
-		const upload_state = state.upload_state;
-
-		// Initialize file_state.file[i] (if needed)
-		if (upload_index >= state.upload_state.files.length)
+		// Initialize the following (if needed):
+		// - upload_state.files[i]
+		// - upload_state.msg
+		// 
+		if (upload_index < file_list.length)
 		{
-			const file = state.file_list[upload_index];
+			if (upload_index >= upload_state.files.length)
+			{
+				log.debug(`Creating upload_state.files[${upload_index}]`);
 
-			const encryption_key = util.randomEncryptionKey();
-			const random_filename = util.randomFileName();
+				const encryption_key = util.randomEncryptionKey();
+				const random_filename = util.randomFileName();
 
-			const request_id_rcrd = util.randomHexString(16);
-			const request_id_data = util.randomHexString(16);
+				const request_id_rcrd = util.randomHexString(16);
+				const request_id_data = util.randomHexString(16);
 
-			const cloud_path   = `com.4th-a.storm4/temp/random_filename`;
+				const cloud_path   = `com.4th-a.storm4/temp/random_filename`;
 
-			const file_state: UploadState_File = {
-				encryption_key,
-				random_filename,
-				request_id_rcrd,
-				request_id_data,
-				cloud_path,
-				has_uploaded_rcrd : false,
-				is_mulitpart      : false
-			};
+				const file_state: UploadState_File = {
+					encryption_key,
+					random_filename,
+					request_id_rcrd,
+					request_id_data,
+					cloud_path,
+					has_uploaded_rcrd : false,
+					is_mulitpart      : false
+				};
 
-			state.upload_state.files.push(file_state);
+				upload_state.files.push(file_state);
+			}
+		}
+		else if (upload_state.done_polling)
+		{
+			if (upload_state.msg == null)
+			{
+				const encryption_key = util.randomEncryptionKey();
+				const random_filename = util.randomFileName();
+
+				const request_id_rcrd = util.randomHexString(16);
+
+				const msg_state: UploadState_Msg = {
+					encryption_key,
+					random_filename,
+					request_id_rcrd,
+					has_uploaded_rcrd: false,
+				};
+
+				upload_state.msg = msg_state;
+			}
 		}
 
 		this.setState({
-			is_uploading: true
+			is_uploading : true,
+			upload_state : upload_state
 
 		}, ()=> {
 
-			const upload_state_file = upload_state[upload_index];
-
-			if (!upload_state_file.has_uploaded_rcrd)
+			if (upload_index < file_list.length)
 			{
-				this.uploadRcrd({upload_state, upload_index});
+				const file_state = upload_state.files[upload_index];
+
+				if (!file_state.has_uploaded_rcrd)
+				{
+					this.uploadRcrd({upload_state, upload_index});
+				}
+				else
+				{
+					if (file_state.is_mulitpart) {
+						this.uploadFile_singlePart({upload_state, upload_index});
+					}
+					else {
+						this.uploadFile_singlePart({upload_state, upload_index});
+					}
+				}
+			}
+			else if (!upload_state.done_polling)
+			{
+				this.pollStagingResponse({upload_state});
 			}
 			else
 			{
-				if (upload_state_file.is_mulitpart) {
-					this.uploadFile_singlePart({upload_state, upload_index});
-				}
-				else {
-					this.uploadFile_singlePart({upload_state, upload_index});
+				const msg_state = upload_state.msg;
+
+				if (msg_state && !msg_state.has_uploaded_rcrd)
+				{
+					this.uploadMessage({upload_state, msg_state});
 				}
 			}
 		});
@@ -1106,7 +1164,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 	): void =>
 	{
-		log.debug("uploadRcrd()");
+		const METHOD_NAME = "uploadRcrd()";
+		log.debug(METHOD_NAME);
 
 		const {upload_state, upload_index} = in_state;
 
@@ -1114,7 +1173,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const file_state = upload_state.files[upload_index];
 
 		const _generateRcrdData = (): void => {
-			log.debug("_generateRcrdData()");
+			log.debug(`${METHOD_NAME}._generateRcrdData()`);
 
 			const json: S4Rcrd = {
 				version  : 3,
@@ -1163,7 +1222,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug("_fetchCredentials()");
+			log.debug(`${METHOD_NAME} _fetchCredentials()`);
 
 			credentials_helper.getCredentials((err, credentials)=> {
 
@@ -1183,7 +1242,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug("_uploadRcrdData()");
+			log.debug(`${METHOD_NAME} _performUpload()`);
 
 			const key = `staging/${upload_state.upload_id}_${file_state.random_filename}_${file.name}.rcrd`;
 
@@ -1216,7 +1275,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _succeed = (
 		): void =>
 		{
-			log.err("uploadRcrd: SUCCESS: ");
+			log.debug(`${METHOD_NAME}._succeed()`);
 
 			const new_upload_state = _.cloneDeep(upload_state);
 			new_upload_state.files[upload_index].has_uploaded_rcrd = true;
@@ -1234,7 +1293,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			err_msg: string
 		): void =>
 		{
-			log.err("uploadRcrd: err: "+ err_msg);
+			log.err(`${METHOD_NAME}._fail(): err: `+ err_msg);
 
 			this.setState({
 				upload_err_msg: err_msg
@@ -1251,7 +1310,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 	): void =>
 	{
-		log.debug("uploadFile_singlePart()");
+		const METHOD_NAME = "uploadFile_singlePart()";
+		log.debug(`${METHOD_NAME}`);
 
 		const {upload_state, upload_index} = in_state;
 
@@ -1261,7 +1321,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _readFile = (
 		): void =>
 		{
-			log.debug("_readFile()");
+			log.debug(`${METHOD_NAME}._readFile()`);
 
 			const file_stream = new FileReader();
 			file_stream.addEventListener("loadend", ()=>{
@@ -1284,7 +1344,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug("_fetchCredentials()");
+			log.debug(`${METHOD_NAME}._fetchCredentials()`);
 
 			credentials_helper.getCredentials((err, credentials)=> {
 
@@ -1304,7 +1364,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug("_performUpload()");
+			log.debug(`${METHOD_NAME}._performUpload()`);
 
 			const key = `staging/${upload_state.upload_id}_${file_state.random_filename}_${file.name}.data`;
 
@@ -1347,16 +1407,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _succeed = (
 		): void =>
 		{
-			log.err("uploadFile_singlePart: SUCCESS: ");
-		
+			log.err(`${METHOD_NAME}._succeed()`);
+			
 			this.setState((current)=> {
 				
-				const next = {...current};
+				const next = _.cloneDeep(current) as ISendState;
 				next.upload_index++;
 				next.upload_progress = 0;
-				next.upload_state = null;
 
 				return next;
+
+			}, ()=> {
+
+				this.uploadNext();
 			});
 		}
 
@@ -1364,7 +1427,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			err_msg: string
 		): void =>
 		{
-			log.err("uploadFile_singlePart: err: "+ err_msg);
+			log.err(`${METHOD_NAME}._fail(): err: `+ err_msg);
 
 			this.setState({
 				upload_err_msg: err_msg
@@ -1374,19 +1437,52 @@ class Send extends React.Component<ISendProps, ISendState> {
 		_readFile();
 	}
 
-	protected uploadMessage = (
+	protected pollStagingResponse = (
 		in_state: {
 			upload_state : UploadState
 		}
 	): void =>
 	{
-		log.debug("uploadMessage()");
+		const METHOD_NAME = "pollStagingResponse()";
+		log.debug(`${METHOD_NAME}`);
 
-		const {upload_state} = in_state;
-		const encryption_key = util.randomEncryptionKey();
+		// Todo...
+
+		this.setState((current)=> {
+
+			const next = _.cloneDeep(current) as ISendState;
+			if (next.upload_state)
+			{
+				for (const file_state of next.upload_state.files)
+				{
+					file_state.cloud_id = "fake_it_til_we_make_it";
+				}
+
+				next.upload_state.done_polling = true;
+			}
+
+			return next;
+
+		}, ()=> {
+
+			this.uploadNext();
+		});
+	}
+
+	protected uploadMessage = (
+		in_state: {
+			upload_state : UploadState
+			msg_state    : UploadState_Msg
+		}
+	): void =>
+	{
+		const METHOD_NAME = "uploadMessage()";
+		log.debug(`${METHOD_NAME}`);
+
+		const {upload_state, msg_state} = in_state;
 		
 		const _generateRcrdData = (): void => {
-			log.debug("_generateRcrdData()");
+			log.debug(`${METHOD_NAME}._generateRcrdData()`);
 
 			const json: S4Rcrd = {
 				version  : 3,
@@ -1402,9 +1498,18 @@ class Send extends React.Component<ISendProps, ISendState> {
 					attachments : []
 				};
 
+				let index = 0;
 				for (const file_state of upload_state.files)
 				{
+					const filename = this.state.file_list[index].name;
 
+					data_obj.attachments.push(make_attachment({
+						cloudPath   : file_state.cloud_path,
+						cloudFileID : file_state.cloud_id!,
+						filename    : filename
+					}));
+
+					index++;
 				}
 	
 				const data_cleartext = JSON.stringify(data_obj, null, 0);
@@ -1422,7 +1527,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				// Todo: encrypt key
 				// Need: ECC 41417 support in JS
 				//
-				const key_cleartext_b64 = base64.fromByteArray(file_state.encryption_key);
+				const key_cleartext_b64 = base64.fromByteArray(msg_state.encryption_key);
 	
 				json.keys[key_id] = {
 					perms : "rws",
@@ -1433,8 +1538,98 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const rcrd_str = JSON.stringify(json, null, 0);
 
 			// Next step
-		//	_fetchCredentials({rcrd_str});
+			_fetchCredentials({rcrd_str});
 		}
+
+		const _fetchCredentials = (
+			state: {
+				rcrd_str: string
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._fetchCredentials()`);
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					_fail("Unable to connect to server. Check internet connection.");
+				}
+			});
+		}
+
+		const _performUpload = (
+			state: {
+				rcrd_str    : string,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._performUpload()`);
+
+			const key = `staging/${upload_state.upload_id}_${msg_state.random_filename}_msg.rcrd`;
+
+			const s3 = new S3({
+				credentials : state.credentials,
+				region      : 'us-west-2'
+			});
+
+			const upload = s3.upload({
+				Bucket        : 'cloud.storm4.test',
+				Key           : key,
+				Body          : state.rcrd_str
+			});
+
+			upload.send((err, data)=> {
+
+				if (err)
+				{
+					log.err("s3.upload.send(): err: "+ err);
+
+					_fail("Failed to send file. Check internet connection.")
+				}
+				else
+				{
+					_succeed();
+				}
+			});
+		}
+
+		const _succeed = (
+			): void =>
+		{
+			log.err(`${METHOD_NAME}._succeed()`);
+
+			this.setState((current)=> {
+
+				const next = _.cloneDeep(current) as ISendState;
+				if (next.upload_state && next.upload_state.msg)
+				{
+					next.upload_state.msg.has_uploaded_rcrd = true;
+				}
+
+				return next;
+				
+			}, ()=> {
+
+				// Done !
+			});
+		}
+	
+		const _fail = (
+			err_msg: string
+		): void =>
+		{
+			log.err(`${METHOD_NAME}._fail(): err: `+ err_msg);
+			
+			this.setState({
+				upload_err_msg: err_msg
+			});
+		}
+
+		_generateRcrdData();
 	}
 
 	public renderUserProfile(): React.ReactNode|React.ReactFragment {
@@ -2253,8 +2448,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 	//		);
 	//	}
 
-		log.debug("state.upload_index: "+ state.upload_index);
-
 		return (
 			<div className={classes.section_fileList}>
 				<Table className={classes.table}>
@@ -2263,9 +2456,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 							const is_uploaded = (state.upload_index > idx);
 						//	const is_uploading_any_file = state.is_uploading;
-							let is_uploading_this_file = state.is_uploading && (state.upload_index == idx);
-
-							is_uploading_this_file = (idx == 0);
+							const is_uploading_this_file = state.is_uploading && (state.upload_index == idx);
 
 							if (is_uploaded)
 							{
@@ -2293,8 +2484,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 							}
 							else if (is_uploading_this_file)
 							{
-							//	const progress = state.upload_progress || 0;
-								const progress = 30;
+								const progress = state.upload_progress || 0;
 
 								return (
 									<TableRow key={`${idx}`} className={classes.tableRow}>

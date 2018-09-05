@@ -350,7 +350,7 @@ export function randomEncryptionKey(): Uint8Array
 {
 	const crypto: Crypto = window.crypto || (window as any).msCrypto;
 
-	const encryption_key = new Uint8Array(512);
+	const encryption_key = new Uint8Array(512 / 8);
 	crypto.getRandomValues(encryption_key);
 
 	return encryption_key;
@@ -386,7 +386,7 @@ function randomString(
 	for (let i = 0; i < length; i++)
 	{
 		const random = Math.random();
-		const index = Math.round(random * alphabet_length);
+		const index = Math.floor(random * alphabet_length);
 
 		result += alphabet[index];
 	}
