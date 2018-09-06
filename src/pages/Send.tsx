@@ -69,6 +69,7 @@ import AccountCircleIcon from '@material-ui/icons/AccountCircle';
 import CheckCircleIcon from '@material-ui/icons/CheckCircle';
 import DeleteIcon from '@material-ui/icons/Delete';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
+import HighlightOffIcon from '@material-ui/icons/HighlightOff';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import ReportProblemIcon from '@material-ui/icons/ReportProblem';
 
@@ -266,10 +267,18 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	uploadInfo_text: {
 		flexBasis: 'auto'
 	},
-	uploadInfo_file_progress: {
+	uploadInfo_text_separate: {
 		flexBasis: 'auto',
 		marginTop: theme.spacing.unit,
 		marginBottom: theme.spacing.unit
+	},
+	uploadInfo_button: {
+		marginTop: theme.spacing.unit * 4
+	},
+	uploadInfo_icon: {
+		width: 32,
+		height: 32,
+		marginTop: theme.spacing.unit
 	},
 	section_fileList: {
 		marginTop: theme.spacing.unit * 4
@@ -302,7 +311,6 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginRight: 0, 
 		marginTop: 2,
 		marginBottom: 2,
-	//	backgroundColor: 'pink'
 	},
 	fileNameWithProgress: {
 		wordWrap: 'break-word',
@@ -371,7 +379,9 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 });
 
 interface UploadState_MultipartInfo {
-	// Todo...
+	upload_id ?: string,
+	part_size  : number,
+	num_parts  : number,
 }
 
 interface UploadState_File {
@@ -379,10 +389,10 @@ interface UploadState_File {
 	random_filename    : string,
 	request_id_rcrd    : string,
 	request_id_data    : string,
-	cloud_path         : string,
-	cloud_id          ?: string,
 	has_uploaded_rcrd  : boolean,
-	is_mulitpart       : boolean,
+	mulitpart_info    ?: UploadState_MultipartInfo,
+	anonymous_id      ?: string,
+	cloud_id          ?: string,
 }
 
 interface UploadState_Msg {
@@ -453,13 +463,14 @@ interface ISendState {
 	is_uploading      : boolean,
 	upload_index      : number,
 	upload_progress   : number,
-	upload_err_msg    : string|null,
+	upload_success    : boolean,
+	upload_err_retry  : number|null,
+	upload_err_fatal  : string|null
 	upload_state      : UploadState|null,
 }
 
-class Send extends React.Component<ISendProps, ISendState> {
-
-	public state: ISendState = {
+function getStartingState(): ISendState {
+	const state: ISendState = {
 		is_fetching_user_profile  : false,
 		user_profile              : null,
 		user_profile_identity_idx : null,
@@ -492,9 +503,22 @@ class Send extends React.Component<ISendProps, ISendState> {
 		is_uploading      : false,
 		upload_index      : 0,
 		upload_progress   : 0,
-		upload_err_msg    : null,
+		upload_success    : false,
+		upload_err_retry  : null,
+		upload_err_fatal  : null,
 		upload_state      : null
-	}
+	};
+	return state;
+}
+
+class Send extends React.Component<ISendProps, ISendState> {
+
+	public state: ISendState = getStartingState();
+
+	protected retry_start: number|null = null;
+	protected retry_timer: NodeJS.Timer|null = null;
+
+	protected test_count = 0;
 
 	protected isProbablyMobile = (): boolean => {
 
@@ -509,6 +533,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 		return (android || iOS);
 	}
 
+	/**
+	 * Returns the index of the identity that should be displayed.
+	 * That is:
+	 * - state.user_profile.auth0.identitie[THIS_NUMBER_HERE]
+	 * 
+	 * This is done by checking the various posibilities including:
+	 * - query parameters
+	 * - the user's preferred identity
+	 * - an explicitly selected identity
+	**/
 	protected getIdentityIdx = (): number => {
 
 		const user_profile = this.state.user_profile;
@@ -549,6 +583,54 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		return 0;
+	}
+
+	protected getCloudPath = (
+		file_state: UploadState_File
+	): string =>
+	{
+		return `com.4th-a.storm4/temp/${file_state.random_filename}`;
+	}
+
+	protected getStagingPathForFile = (
+		options: {
+			upload_state : UploadState,
+			file_state   : UploadState_File,
+			file         : ImageFile,
+			ext          : "rcrd"|"data"
+		}
+	): string =>
+	{
+		// ----- TEMP CODE -----
+		// Replace me with proper staging path for user bucket.
+
+		const upload_id = options.upload_state.upload_id;
+		const random_filename = options.file_state.random_filename;
+		const cleartext_filename = options.file.name;
+
+		return `staging/${upload_id}_${random_filename}_${cleartext_filename}.rcrd`;
+
+		//
+		// ----- TEMP CODE -----
+	}
+
+	protected getStagingPathForMsg = (
+		options: {
+			upload_state : UploadState,
+			msg_state    : UploadState_Msg
+		}
+	): string =>
+	{
+		// ----- TEMP CODE -----
+		// Replace me with proper staging path for user bucket.
+
+		const upload_id = options.upload_state.upload_id;
+		const random_filename = options.msg_state.random_filename;
+		
+		return `staging/${upload_id}_${random_filename}_msg.rcrd`;
+
+		//
+		// ----- TEMP CODE -----
 	}
 
 	protected fetchUserProfile = ()=> {
@@ -1039,6 +1121,71 @@ class Send extends React.Component<ISendProps, ISendState> {
 		this.uploadNext();
 	}
 
+	protected onRetryTimerTick = (): void => {
+		log.debug("onTimerTick()");
+
+		let fire_timer = false;
+		let cancel_timer = false;
+
+		this.setState((current)=> {
+
+			const next = _.cloneDeep(current) as ISendState;
+
+			if (this.retry_timer)
+			{
+				if (next.upload_err_retry != null)
+				{
+					next.upload_err_retry--;
+					if (next.upload_err_retry <= 0)
+					{
+						next.upload_err_retry = null;
+
+						fire_timer = true;
+						cancel_timer = true;
+					}
+				}
+				else
+				{
+					cancel_timer = true;
+				}
+			}
+
+			return next;
+
+		}, ()=> {
+
+			if (cancel_timer && this.retry_timer) {
+				clearInterval(this.retry_timer);
+				this.retry_timer = null;
+				this.retry_start = null;
+			}
+
+			if (fire_timer) {
+				this.uploadNext();
+			}
+		});
+	}
+
+	protected onRetryNow = (): void => {
+		log.debug("onRetryNow()");
+
+		this.setState({
+			upload_err_retry: null
+		}, ()=> {
+			this.uploadNext();
+		})
+	}
+
+	protected onStartOver = (): void => {
+		log.debug("onStartOver()");
+
+		this.setState(()=> {
+			return getStartingState();
+		}, ()=> {
+			this.bootstrap();
+		});
+	}
+
 	protected uploadNext = (): void => {
 		log.debug("uploadNext()");
 
@@ -1082,16 +1229,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const request_id_rcrd = util.randomHexString(16);
 				const request_id_data = util.randomHexString(16);
 
-				const cloud_path   = `com.4th-a.storm4/temp/random_filename`;
-
 				const file_state: UploadState_File = {
 					encryption_key,
 					random_filename,
 					request_id_rcrd,
 					request_id_data,
-					cloud_path,
 					has_uploaded_rcrd : false,
-					is_mulitpart      : false
 				};
 
 				upload_state.files.push(file_state);
@@ -1101,6 +1244,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			if (upload_state.msg == null)
 			{
+				log.debug(`Creating upload_state.msg_state`);
+
 				const encryption_key = util.randomEncryptionKey();
 				const random_filename = util.randomFileName();
 
@@ -1127,31 +1272,35 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				const file_state = upload_state.files[upload_index];
 
-				if (!file_state.has_uploaded_rcrd)
+				if ( ! file_state.has_uploaded_rcrd)
 				{
 					this.uploadRcrd({upload_state, upload_index});
 				}
 				else
 				{
-					if (file_state.is_mulitpart) {
-						this.uploadFile_singlePart({upload_state, upload_index});
+					if (file_state.mulitpart_info) {
+						this.uploadFile_multipart({upload_state, upload_index});
 					}
 					else {
-						this.uploadFile_singlePart({upload_state, upload_index});
+						this.uploadFile_unipart({upload_state, upload_index});
 					}
 				}
 			}
 			else if (!upload_state.done_polling)
 			{
-				this.pollStagingResponse({upload_state});
+				this.uploadFiles_pollStatus({upload_state});
 			}
 			else
 			{
-				const msg_state = upload_state.msg;
+				const msg_state = upload_state.msg!;
 
-				if (msg_state && !msg_state.has_uploaded_rcrd)
+				if ( ! msg_state.has_uploaded_rcrd)
 				{
 					this.uploadMessage({upload_state, msg_state});
+				}
+				else if ( ! state.upload_success)
+				{
+					this.uploadMessage_pollStatus();
 				}
 			}
 		});
@@ -1213,7 +1362,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const rcrd_str = JSON.stringify(json, null, 0);
 
 			// Next step
-			_fetchCredentials({rcrd_str});
+		//	_fetchCredentials({rcrd_str});
+			this.uploadFail();
 		}
 
 		const _fetchCredentials = (
@@ -1230,7 +1380,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 					_performUpload({...state, credentials});
 				}
 				else {
-					_fail("Unable to connect to server. Check internet connection.");
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					this.uploadFail();
 				}
 			});
 		}
@@ -1242,9 +1393,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug(`${METHOD_NAME} _performUpload()`);
+			log.debug(`${METHOD_NAME}._performUpload()`);
 
-			const key = `staging/${upload_state.upload_id}_${file_state.random_filename}_${file.name}.rcrd`;
+			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "rcrd"});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -1262,8 +1413,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				if (err)
 				{
 					log.err("s3.upload.send(): err: "+ err);
-
-					_fail("Failed to send file. Check internet connection.")
+					this.uploadFail();
 				}
 				else
 				{
@@ -1289,28 +1439,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
-		const _fail = (
-			err_msg: string
-		): void =>
-		{
-			log.err(`${METHOD_NAME}._fail(): err: `+ err_msg);
-
-			this.setState({
-				upload_err_msg: err_msg
-			});
-		}
-
 		_generateRcrdData();
 	}
 
-	protected uploadFile_singlePart = (
+	protected uploadFile_unipart = (
 		in_state: {
 			upload_state : UploadState,
 			upload_index : number
 		}
 	): void =>
 	{
-		const METHOD_NAME = "uploadFile_singlePart()";
+		const METHOD_NAME = "uploadFile_unipart()";
 		log.debug(`${METHOD_NAME}`);
 
 		const {upload_state, upload_index} = in_state;
@@ -1328,7 +1467,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				const file_buffer = file_stream.result as ArrayBuffer;
 				if (file_buffer == null) {
-					_fail("Unable to read file: "+ file.name);
+					this.uploadFail(`Unable to read file: ${file.name}`);
 				}
 				else {
 					_fetchCredentials({file_buffer})
@@ -1352,7 +1491,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 					_performUpload({...state, credentials});
 				}
 				else {
-					_fail("Unable to connect to server. Check internet connection.");
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					this.uploadFail();
 				}
 			});
 		}
@@ -1366,7 +1506,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._performUpload()`);
 
-			const key = `staging/${upload_state.upload_id}_${file_state.random_filename}_${file.name}.data`;
+			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -1394,8 +1534,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				if (err)
 				{
-					log.err("upload err: "+ err);
-					_fail("Failed to send file. Check internet connection.")
+					log.err("s3.upload.send(): err: "+ err);
+					this.uploadFail();
 				}
 				else
 				{
@@ -1423,27 +1563,34 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
-		const _fail = (
-			err_msg: string
-		): void =>
-		{
-			log.err(`${METHOD_NAME}._fail(): err: `+ err_msg);
-
-			this.setState({
-				upload_err_msg: err_msg
-			});
-		}
-
 		_readFile();
 	}
 
-	protected pollStagingResponse = (
+	protected uploadFile_multipart = (
+		in_state: {
+			upload_state : UploadState,
+			upload_index : number
+		}
+	): void =>
+	{
+		const METHOD_NAME = "pollStagingResponse()";
+		log.debug(`${METHOD_NAME}`);
+
+		const {upload_state, upload_index} = in_state;
+
+		const file = this.state.file_list[upload_index];
+		const file_state = upload_state.files[upload_index];
+
+
+	}
+
+	protected uploadFiles_pollStatus = (
 		in_state: {
 			upload_state : UploadState
 		}
 	): void =>
 	{
-		const METHOD_NAME = "pollStagingResponse()";
+		const METHOD_NAME = "uploadFiles_pollStatus()";
 		log.debug(`${METHOD_NAME}`);
 
 		// Todo...
@@ -1501,10 +1648,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 				let index = 0;
 				for (const file_state of upload_state.files)
 				{
+					const cloudPath = this.getCloudPath(file_state);
 					const filename = this.state.file_list[index].name;
 
 					data_obj.attachments.push(make_attachment({
-						cloudPath   : file_state.cloud_path,
+						cloudPath   : cloudPath,
 						cloudFileID : file_state.cloud_id!,
 						filename    : filename
 					}));
@@ -1555,7 +1703,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 					_performUpload({...state, credentials});
 				}
 				else {
-					_fail("Unable to connect to server. Check internet connection.");
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					this.uploadFail();
 				}
 			});
 		}
@@ -1569,7 +1718,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._performUpload()`);
 
-			const key = `staging/${upload_state.upload_id}_${msg_state.random_filename}_msg.rcrd`;
+			const key = this.getStagingPathForMsg({upload_state, msg_state});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -1587,8 +1736,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				if (err)
 				{
 					log.err("s3.upload.send(): err: "+ err);
-
-					_fail("Failed to send file. Check internet connection.")
+					this.uploadFail();
 				}
 				else
 				{
@@ -1609,6 +1757,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				{
 					next.upload_state.msg.has_uploaded_rcrd = true;
 				}
+				next.upload_success = true;
 
 				return next;
 				
@@ -1617,19 +1766,50 @@ class Send extends React.Component<ISendProps, ISendState> {
 				// Done !
 			});
 		}
-	
-		const _fail = (
-			err_msg: string
-		): void =>
-		{
-			log.err(`${METHOD_NAME}._fail(): err: `+ err_msg);
-			
-			this.setState({
-				upload_err_msg: err_msg
-			});
-		}
 
 		_generateRcrdData();
+	}
+
+	protected uploadMessage_pollStatus = (
+	): void =>
+	{
+		const METHOD_NAME = "uploadMessage_pollStatus()";
+		log.debug(`${METHOD_NAME}`);
+
+		// Todo...
+
+		this.setState({
+			upload_success: true
+		});
+	}
+
+	protected uploadFail = (
+		upload_err_fatal ?: string
+	): void =>
+	{
+		log.err(`uploadFail()`);
+
+		if (upload_err_fatal)
+		{
+			this.setState({
+				upload_err_fatal
+			});
+		}
+		else
+		{
+			this.setState({
+				upload_err_retry: 90
+
+			}, ()=> {
+
+				if (this.retry_timer) {
+					clearInterval(this.retry_timer);
+				}
+
+				this.retry_start = Date.now();
+				this.retry_timer = setInterval(this.onRetryTimerTick, 1000);
+			});
+		}
 	}
 
 	public renderUserProfile(): React.ReactNode|React.ReactFragment {
@@ -2308,7 +2488,118 @@ class Send extends React.Component<ISendProps, ISendState> {
 		);
 	}
 
-	public renderUploadInfo(): React.ReactNode {
+	public renderUploadInfo_err_fatal(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		const fatal_msg = state.upload_err_fatal || "";
+
+		return (
+			<div className={classes.section_uploadInfo}>
+				<div className={classes.uploadInfo_description_container}>
+					<Typography
+						align="center"
+						variant="title"
+						className={classes.uploadInfo_text}
+					>
+						Upload Failed
+					</Typography>
+					<Typography
+						align="center"
+						variant="subheading"
+						className={classes.uploadInfo_text}
+					>
+						{fatal_msg}
+					</Typography>
+					<Button
+						variant="contained"
+						color="secondary"
+						onClick={this.onStartOver}
+						className={classes.uploadInfo_button}
+					>Start Over</Button>
+				</div>
+			</div>
+		);
+	}
+
+	public renderUploadInfo_err_retry(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		const remaining = state.upload_err_retry || 0;
+
+		let text: string;
+		if (remaining == 1) {
+			text = "Retrying in 1 second...";
+		}
+		else {
+			text = `Retrying in ${remaining} seconds...`;
+		}
+
+		return (
+			<div className={classes.section_uploadInfo}>
+				<div className={classes.uploadInfo_description_container}>
+					<Typography
+						align="center"
+						variant="title"
+						className={classes.uploadInfo_text}
+					>
+						Upload Failed
+					</Typography>
+					<Typography
+						align="center"
+						variant="subheading"
+						className={classes.uploadInfo_text}
+					>
+						Check internet connection.
+					</Typography>
+					<Typography
+						align="center"
+						variant="subheading"
+						className={classes.uploadInfo_text_separate}
+					>
+						{text}
+					</Typography>
+					<Button
+						variant="contained"
+						color="secondary"
+						onClick={this.onRetryNow}
+						className={classes.uploadInfo_button}
+					>Retry Now</Button>
+				</div>
+			</div>
+		);
+	}
+
+	public renderUploadInfo_success(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		return (
+			<div className={classes.section_uploadInfo}>
+				<div className={classes.uploadInfo_description_container}>
+					<Typography
+						align="center"
+						variant="title"
+						className={classes.uploadInfo_text}
+					>
+						Upload Complete
+					</Typography>
+					<CheckCircleIcon
+						nativeColor='green'
+						className={classes.uploadInfo_icon} />
+					<Button
+						variant="contained"
+						color="primary"
+						onClick={this.onStartOver}
+						className={classes.uploadInfo_button}
+					>Start Over</Button>
+				</div>
+			</div>
+		);
+	}
+
+	public renderUploadInfo_progress(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
 
@@ -2404,7 +2695,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				<Typography
 					align="center"
 					variant="subheading"
-					className={classes.uploadInfo_file_progress}
+					className={classes.uploadInfo_text_separate}
 				>
 					File progress:<span className={classes.monospaced}>{percent}</span><span className={classes.gray}>%</span>
 				</Typography>
@@ -2416,7 +2707,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				<Typography
 					align="center"
 					variant="subheading"
-					className={classes.uploadInfo_file_progress}
+					className={classes.uploadInfo_text_separate}
 				>&nbsp;
 				</Typography>
 			);
@@ -2431,6 +2722,137 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</div>
 			</div>
 		);
+	}
+
+	public renderUploadInfo(): React.ReactNode {
+		const {state} = this;
+
+		if (state.upload_err_fatal) {
+			return this.renderUploadInfo_err_fatal();
+		}
+		else if (state.upload_err_retry) {
+			return this.renderUploadInfo_err_retry();
+		}
+		else if (state.upload_success) {
+			return this.renderUploadInfo_success();
+		}
+		else {
+			return this.renderUploadInfo_progress();
+		}
+	}
+
+	public renderFileRow(file: ImageFile, idx: number): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		const file_is_uploaded = (state.upload_index > idx);
+		const file_is_uploading = state.is_uploading && (state.upload_index == idx);
+
+		if (file_is_uploaded)
+		{
+			return (
+				<TableRow key={`${idx}`} className={classes.tableRow}>
+					<TableCell padding="none">
+						<div className={classes.tableCell_div_container_fileName}>
+							<Typography className={classes.fileNameWithoutProgress}>
+								{file.name}
+							</Typography>
+						</div>
+					</TableCell>
+					<TableCell padding="none" className={classes.tableCell_right}>
+						<div className={classes.tableCell_div_container_buttons}>
+							<Typography className={classes.fileSizeText}>
+								{filesize(file.size)}
+							</Typography>
+							<CheckCircleIcon
+								className={classes.tableCell_iconRight}
+								nativeColor='green' />
+						</div>
+					</TableCell>
+				</TableRow>
+			);	
+		}
+		else if (file_is_uploading)
+		{
+			const upload_failed = (state.upload_err_retry || state.upload_err_fatal);
+
+			// We're going to display the progress, even if the upload has failed.
+			// In the case of multipart, this makes sense as the upload is resumable.
+			// 
+			const progress = state.upload_progress || 0;
+
+			let section_status: React.ReactNode;
+			if (upload_failed) {
+				section_status = (
+					<HighlightOffIcon
+						className={classes.tableCell_iconRight}
+						color="secondary"
+					/>
+				);
+			}
+			else {
+				section_status = (
+					<CircularProgress
+						className={classes.tableCell_circularProgress}
+						color="secondary"
+						size={16}
+					/>
+				);
+			}
+
+			return (
+				<TableRow key={`${idx}`} className={classes.tableRow}>
+					<TableCell padding="none">
+						<div className={classes.tableCell_div_container_fileName}>
+							<Typography className={classes.fileNameWithProgress}>
+								{file.name}
+							</Typography>
+							<LinearProgress
+								className={classes.tableCell_linearProgress}
+								variant="determinate"
+								value={progress}
+							/>
+						</div>
+					</TableCell>
+					<TableCell padding="none" className={classes.tableCell_right}>
+						<div className={classes.tableCell_div_container_buttons}>
+							<Typography className={classes.fileSizeText}>
+								{filesize(file.size)}
+							</Typography>
+							{section_status}
+						</div>
+					</TableCell>
+				</TableRow>
+			);
+		}
+		else
+		{
+			const onClick = this.deleteFile.bind(this, idx);
+
+			return (
+				<TableRow key={`${idx}`} className={classes.tableRow}>
+					<TableCell padding="none">
+						<div className={classes.tableCell_div_container_fileName}>
+							<Typography className={classes.fileNameWithoutProgress}>
+								{file.name}
+							</Typography>
+						</div>
+					</TableCell>
+					<TableCell padding="none" className={classes.tableCell_right}>
+						<div className={classes.tableCell_div_container_buttons}>
+							<Typography className={classes.fileSizeText}>
+								{filesize(file.size)}
+							</Typography>
+							<Tooltip title="Remove file from list">
+								<IconButton onClick={onClick} className={classes.tableCell_buttonRight}>
+									<DeleteIcon className={classes.tableCell_buttonRight_icon}/>
+								</IconButton>
+							</Tooltip>
+						</div>
+					</TableCell>
+				</TableRow>
+			);
+		}
 	}
 
 	public renderFileList(): React.ReactNode {
@@ -2453,96 +2875,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				<Table className={classes.table}>
 					<TableBody>
 						{file_list.map((file, idx)=> {
-
-							const is_uploaded = (state.upload_index > idx);
-						//	const is_uploading_any_file = state.is_uploading;
-							const is_uploading_this_file = state.is_uploading && (state.upload_index == idx);
-
-							if (is_uploaded)
-							{
-								return (
-									<TableRow key={`${idx}`} className={classes.tableRow}>
-										<TableCell padding="none">
-											<div className={classes.tableCell_div_container_fileName}>
-												<Typography className={classes.fileNameWithoutProgress}>
-													{file.name}
-												</Typography>
-											</div>
-										</TableCell>
-										<TableCell padding="none" className={classes.tableCell_right}>
-											<div className={classes.tableCell_div_container_buttons}>
-												<Typography className={classes.fileSizeText}>
-													{filesize(file.size)}
-												</Typography>
-												<CheckCircleIcon
-													className={classes.tableCell_iconRight}
-													nativeColor='green' />
-											</div>
-										</TableCell>
-									</TableRow>
-								);	
-							}
-							else if (is_uploading_this_file)
-							{
-								const progress = state.upload_progress || 0;
-
-								return (
-									<TableRow key={`${idx}`} className={classes.tableRow}>
-										<TableCell padding="none">
-											<div className={classes.tableCell_div_container_fileName}>
-												<Typography className={classes.fileNameWithProgress}>
-													{file.name}
-												</Typography>
-												<LinearProgress
-													className={classes.tableCell_linearProgress}
-													variant="determinate"
-													value={progress}
-												/>
-											</div>
-										</TableCell>
-										<TableCell padding="none" className={classes.tableCell_right}>
-											<div className={classes.tableCell_div_container_buttons}>
-												<Typography className={classes.fileSizeText}>
-													{filesize(file.size)}
-												</Typography>
-												<CircularProgress
-													className={classes.tableCell_circularProgress}
-													color="secondary"
-													size={16}
-												/>
-											</div>
-										</TableCell>
-									</TableRow>
-								);
-							}
-							else
-							{
-								const onClick = this.deleteFile.bind(this, idx);
-
-								return (
-									<TableRow key={`${idx}`} className={classes.tableRow}>
-										<TableCell padding="none">
-											<div className={classes.tableCell_div_container_fileName}>
-												<Typography className={classes.fileNameWithoutProgress}>
-													{file.name}
-												</Typography>
-											</div>
-										</TableCell>
-										<TableCell padding="none" className={classes.tableCell_right}>
-											<div className={classes.tableCell_div_container_buttons}>
-												<Typography className={classes.fileSizeText}>
-													{filesize(file.size)}
-												</Typography>
-												<Tooltip title="Remove file from list">
-													<IconButton onClick={onClick} className={classes.tableCell_buttonRight}>
-														<DeleteIcon className={classes.tableCell_buttonRight_icon}/>
-													</IconButton>
-												</Tooltip>
-											</div>
-										</TableCell>
-									</TableRow>
-								);
-							}
+							return this.renderFileRow(file, idx);
 						})}
 					</TableBody>
 				</Table>
@@ -2631,7 +2964,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const section_expansionPanel3 = this.renderExpansionPanel3();
 			const section_selectionOrInfo = state.is_uploading
 														 ? this.renderUploadInfo()
-			                                  :  this.renderFileSelection();
+			                                  : this.renderFileSelection();
 			const section_fileList        = this.renderFileList();
 			const section_comment         = this.renderComment();
 			const section_button          = this.renderSendButton();
@@ -2656,7 +2989,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 	public componentDidMount() {
 		log.debug("componentDidMount()");
 
-		log.debug("query parameters: "+ this.props.location.search);
+		this.bootstrap();
+	}
+
+	/**
+	 * Kicks off the UI.
+	 * Invoked by:
+	 * - componentDidMount()
+	 * - onStartOver();
+	**/
+	public bootstrap() {
 
 		this.fetchUserProfile();
 	}

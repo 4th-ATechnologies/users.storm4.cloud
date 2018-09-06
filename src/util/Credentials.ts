@@ -38,10 +38,10 @@ export function getCredentials(
 		const nowPlusBuffer = Date.now() + (1000 * 60 * 15); // 15 minutes
 		const expire = new Date(cached_credentials.Credentials.Expiration);
 
-		log.debug("cached_credentials: expire: "+ expire);
-
 		if (expire.valueOf() > nowPlusBuffer)
 		{
+			log.debug("Cache hit: reusing existing credentials");
+
 			// We've still got at least 15 minutes to perform the next upload.
 			// So let's go ahead and use the cached credentials again.
 
@@ -56,6 +56,10 @@ export function getCredentials(
 				callback(null, result);
 			});
 			return;
+		}
+		else
+		{
+			log.debug("Cache miss: expires too soon: "+ expire);
 		}
 	}
 
