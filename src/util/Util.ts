@@ -393,3 +393,88 @@ function randomString(
 
 	return result;
 }
+
+export function makeCloudFileHeader(
+	options: {
+		byteLength_metadata  : number,
+		byteLength_thumbnail : number,
+		byteLength_data      : number
+	}
+): ArrayBuffer
+{
+	/**
+	 * typedef struct {
+	 *   uint64_t magic;
+	 *   
+	 *   uint64_t metadataSize;
+	 *   uint64_t thumbnailSize;
+	 *   uint64_t dataSize;
+	 *   
+	 *   uint64_t thumbnailxxHash64;
+	 *   
+	 *   uint8_t  version;
+	 *   uint8_t  reserved[23];
+	 *   
+	 * } S4CloudFileHeaderInfo;
+	 * 
+	 * magic = 0x286F202928206F29
+	**/
+
+	const buffer = new ArrayBuffer(64);
+	const data_view = new DataView(buffer);
+
+	const endian = false; // true:little-endian, false:big-endian
+
+	let offset = 0;
+	
+	const magic = ['28', '6F', '20', '29', '28', '20', '6F', '29'];
+	for (const hex of magic)
+	{
+		data_view.setUint8(offset, parseInt(hex, 16)); offset+=(8/8);
+	}
+	
+	data_view.setUint32(offset, 0, endian); offset+=(32/8);
+	data_view.setUint32(offset, options.byteLength_metadata, endian); offset+=(32/8);
+
+	data_view.setUint32(offset, 0, endian); offset+=(32/8);
+	data_view.setUint32(offset, options.byteLength_thumbnail, endian); offset+=(32/8);
+
+	data_view.setUint32(offset, 0, endian); offset+=(32/8);
+	data_view.setUint32(offset, options.byteLength_data, endian); offset+=(32/8);
+
+	data_view.setUint32(offset, 0, endian); offset+=(32/8);
+	data_view.setUint32(offset, 0, endian); offset+=(32/8);
+
+	for (let i=0; i<24; i++)
+	{
+		data_view.setUint8(offset, 0); offset+=(8/8);
+	}
+
+	return buffer;
+}
+
+/**
+ * Array elements that are null|undefined are ignored.
+**/
+export function concatBuffers(buffers: Array<ArrayBuffer|null|undefined>): Uint8Array
+{
+	const totalByteLength = buffers.reduce<number>((total, buffer)=> {
+		return total + ((buffer == null) ? 0 : buffer.byteLength);
+	}, 0);
+
+	const result = new Uint8Array(totalByteLength);
+	let offset = 0;
+
+	for (const buffer of buffers)
+	{
+		if (buffer != null)
+		{
+			const temp = new Uint8Array(buffer);
+
+			result.set(temp, offset);
+			offset += temp.length;
+		}
+	}
+
+	return result;
+}

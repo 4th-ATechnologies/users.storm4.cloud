@@ -26,11 +26,12 @@ interface CredentialsResponse {
 
 let cached_credentials: CredentialsResponse|null = null;
 
+type GetCredentialsCallback = (err: Error|null, credentials ?: AWSCredentials) => void;
+
+let pending_callbacks: GetCredentialsCallback[] = [];
+
 export function getCredentials(
-	callback : (
-		err          : Error|null,
-		credentials ?: AWSCredentials
-	)=> void
+	in_callback: GetCredentialsCallback
 ): void
 {
 	if (cached_credentials)
@@ -53,7 +54,7 @@ export function getCredentials(
 			result.expireTime = expire;
 
 			setImmediate(()=> {
-				callback(null, result);
+				in_callback(null, result);
 			});
 			return;
 		}
@@ -63,12 +64,20 @@ export function getCredentials(
 		}
 	}
 
+	pending_callbacks.push(in_callback);
+	if (pending_callbacks.length > 1)
+	{
+		// There's already a request in flight.
+		// We're just going to piggyback off that request.
+		return;
+	}
+
 	const host = apiGateway.getHost();
 	const path = apiGateway.getPath("/delegation");
 
 	const url = `https://${host}${path}`;
 
-	const wtf: Promise<any> = fetch(url, {
+	fetch(url, {
 		method : "GET"
 
 	}).then((response)=>{
@@ -97,7 +106,13 @@ export function getCredentials(
 			});
 			result.expireTime = new Date(json.Credentials.Expiration);
 
-			callback(null, result);
+			const callbacks = pending_callbacks;
+			pending_callbacks = [];
+
+			for (const callback of callbacks)
+			{
+				callback(null, result);
+			}
 		}
 		else
 		{
@@ -106,7 +121,13 @@ export function getCredentials(
 
 	}).catch((reason)=> {
 
-		callback(reason);
+		const callbacks = pending_callbacks;
+		pending_callbacks = [];
+
+		for (const callback of callbacks)
+		{
+			callback(reason);
+		}
 	});
 }
 

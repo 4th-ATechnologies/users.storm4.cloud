@@ -378,10 +378,17 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	}
 });
 
-interface UploadState_MultipartInfo {
-	upload_id ?: string,
-	part_size  : number,
-	num_parts  : number,
+interface UploadState_Multipart {
+	part_size     : number,
+	num_parts     : number,
+	upload_id    ?: string,
+	current_part  : number,
+	in_progress   : {
+		[index: number]: boolean|undefined
+	},
+	eTags         : {
+		[index: number]: string|undefined
+	}
 }
 
 interface UploadState_File {
@@ -389,8 +396,9 @@ interface UploadState_File {
 	random_filename    : string,
 	request_id_rcrd    : string,
 	request_id_data    : string,
+	file_preview       : ArrayBuffer|null,
 	has_uploaded_rcrd  : boolean,
-	mulitpart_info    ?: UploadState_MultipartInfo,
+	mulitpart_state   ?: UploadState_Multipart,
 	anonymous_id      ?: string,
 	cloud_id          ?: string,
 }
@@ -604,11 +612,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// ----- TEMP CODE -----
 		// Replace me with proper staging path for user bucket.
 
-		const upload_id = options.upload_state.upload_id;
-		const random_filename = options.file_state.random_filename;
-		const cleartext_filename = options.file.name;
+		const {upload_state, file_state, file, ext} = options;
 
-		return `staging/${upload_id}_${random_filename}_${cleartext_filename}.rcrd`;
+		const upload_id = upload_state.upload_id;
+		const random_filename = file_state.random_filename;
+		const cleartext_filename = file.name;
+
+		return `staging/${upload_id}_${random_filename}_${cleartext_filename}.${ext}`;
 
 		//
 		// ----- TEMP CODE -----
@@ -1186,11 +1196,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected uploadNext = (): void => {
+	protected uploadNext(): void {
 		log.debug("uploadNext()");
 
 		const state = this.state;
 		const {file_list, upload_index} = state;
+
+		const file = file_list[upload_index];
 
 		const old_upload_state = state.upload_state;
 		let upload_state: UploadState;
@@ -1234,6 +1246,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					random_filename,
 					request_id_rcrd,
 					request_id_data,
+					file_preview      : null,
 					has_uploaded_rcrd : false,
 				};
 
@@ -1272,18 +1285,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				const file_state = upload_state.files[upload_index];
 
-				if ( ! file_state.has_uploaded_rcrd)
-				{
+				if ( ! file_state.has_uploaded_rcrd) {
 					this.uploadRcrd({upload_state, upload_index});
 				}
-				else
-				{
-					if (file_state.mulitpart_info) {
-						this.uploadFile_multipart({upload_state, upload_index});
-					}
-					else {
-						this.uploadFile_unipart({upload_state, upload_index});
-					}
+				else {
+					this.uploadFile({upload_state, upload_index});
 				}
 			}
 			else if (!upload_state.done_polling)
@@ -1294,24 +1300,25 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				const msg_state = upload_state.msg!;
 
-				if ( ! msg_state.has_uploaded_rcrd)
-				{
+				if ( ! msg_state.has_uploaded_rcrd) {
 					this.uploadMessage({upload_state, msg_state});
 				}
-				else if ( ! state.upload_success)
-				{
+				else if ( ! state.upload_success) {
 					this.uploadMessage_pollStatus();
+				}
+				else {
+					// Upload complete
 				}
 			}
 		});
 	}
 
-	protected uploadRcrd = (
+	protected uploadRcrd(
 		in_state: {
 			upload_state : UploadState,
 			upload_index : number
 		}
-	): void =>
+	): void
 	{
 		const METHOD_NAME = "uploadRcrd()";
 		log.debug(METHOD_NAME);
@@ -1362,8 +1369,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const rcrd_str = JSON.stringify(json, null, 0);
 
 			// Next step
-		//	_fetchCredentials({rcrd_str});
-			this.uploadFail();
+			_fetchCredentials({rcrd_str});
 		}
 
 		const _fetchCredentials = (
@@ -1381,7 +1387,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
-					this.uploadFail();
+					_fail();
 				}
 			});
 		}
@@ -1413,7 +1419,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				if (err)
 				{
 					log.err("s3.upload.send(): err: "+ err);
-					this.uploadFail();
+					_fail();
 				}
 				else
 				{
@@ -1439,17 +1445,25 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+			
+			this.uploadFail(upload_err_fatal);
+		}
+
 		_generateRcrdData();
 	}
 
-	protected uploadFile_unipart = (
+	protected uploadFile(
 		in_state: {
 			upload_state : UploadState,
 			upload_index : number
 		}
-	): void =>
+	): void
 	{
-		const METHOD_NAME = "uploadFile_unipart()";
+		const METHOD_NAME = "uploadFile()";
 		log.debug(`${METHOD_NAME}`);
 
 		const {upload_state, upload_index} = in_state;
@@ -1457,20 +1471,159 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const file = this.state.file_list[upload_index];
 		const file_state = upload_state.files[upload_index];
 
-		const _readFile = (
-		): void =>
-		{
+		const _readThumbnail = (): void => {
+			log.debug(`${METHOD_NAME}._readThumbnail()`);
+
+			// file.preview is a blob url.
+			// For example: blob:http://localhost:3000/478850dc-08cf-4929-aa8a-af1890ac0350
+
+			if (file.type.startsWith("image/") == false || file.preview == null)
+			{
+				_determineMultipart(null);
+				return;
+			}
+
+			const img = new Image()!;
+			img.onload = (event)=> {
+
+				const MAX_THUMBNAIL_SIZE = 512;
+
+				let width = img.width;
+				let height = img.height;
+
+				if (width > MAX_THUMBNAIL_SIZE || height > MAX_THUMBNAIL_SIZE)
+				{
+					const scale = MAX_THUMBNAIL_SIZE / Math.max(width, height);
+
+					width *= scale;
+					height *= scale;
+				}
+
+				const canvas = document.createElement('canvas');
+				canvas.width = width;
+				canvas.height = height;
+				
+				const ctx = canvas.getContext('2d')!;
+				ctx.drawImage(img, 0, 0, width, height);
+
+				canvas.toBlob((blob)=> {
+					
+					if (blob == null)
+					{
+						_determineMultipart(null);
+						return;
+					}
+
+					const file_stream = new FileReader();
+					file_stream.addEventListener("loadend", ()=>{
+
+						const file_preview = file_stream.result as ArrayBuffer|null;
+
+						// Next step
+						_determineMultipart(file_preview);
+					});
+					file_stream.readAsArrayBuffer(blob);
+					
+				}, "image/jpeg", 0.5); // same JPEG quality settings as macOS/iOS
+			};
+			img.src = file.preview;
+		}
+
+		const _determineMultipart = (file_preview: ArrayBuffer|null): void => {
+			log.debug(`${METHOD_NAME}._determineMultipart()`);
+
+			if (file_preview) {
+				file_state.file_preview = file_preview;
+			}
+			else {
+				file_state.file_preview = new ArrayBuffer(0);
+			}
+
+			if (file.preview) {
+				window.URL.revokeObjectURL(file.preview);
+			}
+
+			let multipart_state: UploadState_Multipart|null = null;
+
+			// Should we use multipart to upload the file ?
+			// 
+			// AWS has some restrictions here we need to be aware of.
+			//
+			// - each part (excluding the last) must be >= 5 MiB
+			// - there can be at most 10,000 parts
+
+			if (file.size >= (1024 * 1024 * 10))
+			{
+				let part_size = (1024 * 1024 * 5);
+				let num_parts = Math.ceil(file.size / part_size);
+
+				while (num_parts > 10000)
+				{
+					part_size += (1024 * 1024 * 1);
+					num_parts = Math.ceil(file.size / part_size);
+				}
+
+				multipart_state = {
+					part_size,
+					num_parts,
+					current_part : 0,
+					in_progress  : {},
+					eTags        : {}
+				};
+			}
+
+			file_state.mulitpart_state = multipart_state || undefined;
+
+			// Next step
+			_dispatch();
+		}
+
+		const _dispatch = () => {
+			log.debug(`${METHOD_NAME}._dispatch()`);
+
+			if (file_state.mulitpart_state) {
+				this.uploadFile_multipart(in_state);
+			}
+			else {
+				this.uploadFile_unipart(in_state)
+			}
+		}
+
+		if (file_state.file_preview == null) {
+			_readThumbnail();
+		}
+		else {
+			_dispatch();
+		}
+	}
+
+	protected uploadFile_unipart (
+		in_state: {
+			upload_state : UploadState,
+			upload_index : number
+		}
+	): void
+	{
+		const METHOD_NAME = "uploadFile_unipart()";
+		log.debug(`${METHOD_NAME}`);
+
+		const {upload_state, upload_index} = in_state;
+
+		const file: ImageFile = this.state.file_list[upload_index];
+		const file_state = upload_state.files[upload_index];
+
+		const _readFile = (): void => {
 			log.debug(`${METHOD_NAME}._readFile()`);
 
 			const file_stream = new FileReader();
 			file_stream.addEventListener("loadend", ()=>{
 
-				const file_buffer = file_stream.result as ArrayBuffer;
-				if (file_buffer == null) {
-					this.uploadFail(`Unable to read file: ${file.name}`);
+				const file_data = file_stream.result as ArrayBuffer|null;
+				if (file_data == null) {
+					_fail(`Unable to read file: ${file.name}`);
 				}
 				else {
-					_fetchCredentials({file_buffer})
+					_fetchCredentials({file_data})
 				}
 			});
 
@@ -1479,7 +1632,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _fetchCredentials = (
 			state: {
-				file_buffer: ArrayBuffer
+				file_data : ArrayBuffer
 			}
 		): void =>
 		{
@@ -1492,32 +1645,42 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
-					this.uploadFail();
+					_fail();
 				}
 			});
 		}
 
 		const _performUpload = (
 			state: {
-				file_buffer : ArrayBuffer,
-				credentials : AWSCredentials
+				file_data    : ArrayBuffer,
+				credentials  : AWSCredentials
 			}
 		): void =>
 		{
 			log.debug(`${METHOD_NAME}._performUpload()`);
 
-			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+			const {file_preview} = file_state;
+			const {file_data} = state;
 
+			const file_header = util.makeCloudFileHeader({
+				byteLength_metadata  : 0,
+				byteLength_thumbnail : (file_preview == null) ? 0 : file_preview.byteLength,
+				byteLength_data      : file_data.byteLength
+			});
+
+			const body = util.concatBuffers([file_header, file_preview, file_data]);
+
+			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+			
 			const s3 = new S3({
 				credentials : state.credentials,
 				region      : 'us-west-2'
 			});
 
-			const upload = s3.upload({
-				Bucket        : 'cloud.storm4.test',
-				Key           : key,
-				Body          : state.file_buffer,
-				ContentLength : state.file_buffer.byteLength
+			const upload = s3.putObject({
+				Bucket : 'cloud.storm4.test',
+				Key    : key,
+				Body   : body,
 			});
 
 			upload.on("httpUploadProgress", (progress)=> {
@@ -1535,18 +1698,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 				if (err)
 				{
 					log.err("s3.upload.send(): err: "+ err);
-					this.uploadFail();
+
+					_fail();
+					return;
 				}
-				else
-				{
-					_succeed();
-				}
+				
+				// Next step
+				_succeed();
 			});
 		};
 
-		const _succeed = (
-		): void =>
-		{
+		const _succeed = (): void => {
 			log.err(`${METHOD_NAME}._succeed()`);
 			
 			this.setState((current)=> {
@@ -1563,32 +1725,325 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+			
+			this.uploadFail(upload_err_fatal);
+		}
+
 		_readFile();
 	}
 
-	protected uploadFile_multipart = (
+	protected uploadFile_multipart(
 		in_state: {
 			upload_state : UploadState,
 			upload_index : number
 		}
-	): void =>
+	): void
 	{
-		const METHOD_NAME = "pollStagingResponse()";
+		const METHOD_NAME = "uploadFile_multipart()";
 		log.debug(`${METHOD_NAME}`);
 
 		const {upload_state, upload_index} = in_state;
 
 		const file = this.state.file_list[upload_index];
 		const file_state = upload_state.files[upload_index];
+		const multipart_state = file_state.mulitpart_state!;
 
+		if (multipart_state.upload_id == null)
+		{
+			this.uploadFile_multipart_initialize({upload_state, upload_index})
+		}
+		else
+		{
+			// Look for remaining parts we still need to upload.
 
+			const available_parts: number[] = [];
+
+			for (let i = 0; i < multipart_state.num_parts; i++)
+			{
+				if (multipart_state.eTags[i] != null) {
+					// Part is already uploaded
+				}
+				else if (multipart_state.in_progress[i] == true) {
+					// Part is being uploaded currently
+				}
+				else {
+					available_parts.push(i);
+				}
+			}
+
+			log.debug(`${METHOD_NAME}: available_parts: ${JSON.stringify(available_parts, null, 2)}`);
+
+			if (available_parts.length == 0)
+			{
+				// We're ready to complete the multipart upload
+			}
+			else
+			{
+				// We still have parts that need uploading.
+
+				const MAX_CONCURRENCY = this.isProbablyMobile() ? 1 : 2;
+
+				for (let i = 0; i < MAX_CONCURRENCY; i++)
+				{
+					const part_index = available_parts[i];
+
+				//	this.uploadFile_multipart_part({upload_state, upload_index, part_index});
+				}
+			}
+		}
 	}
 
-	protected uploadFiles_pollStatus = (
+	protected uploadFile_multipart_initialize(
+		in_state: {
+			upload_state : UploadState,
+			upload_index : number,
+		}
+	): void
+	{
+		const METHOD_NAME = "uploadFile_multipart_initialize()";
+		log.debug(METHOD_NAME);
+
+		const {upload_state, upload_index} = in_state;
+
+		const _fetchCredentials = (): void => {
+			log.debug(`${METHOD_NAME}._fetchCredentials()`);
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performRequest({credentials});
+				}
+				else {
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					_fail();
+				}
+			});
+		}
+
+		const _performRequest = (
+			state: {
+				credentials: AWSCredentials
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._performRequest()`);
+
+			const file = this.state.file_list[upload_index];
+			const file_state = upload_state.files[upload_index];
+
+			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+
+			const s3 = new S3({
+				credentials : state.credentials,
+				region      : 'us-west-2'
+			});
+
+			s3.createMultipartUpload({
+				Bucket : 'cloud.storm4.test',
+				Key    : key
+			
+			}, (err, data)=> {
+
+				if (err)
+				{
+					log.err("${METHOD_NAME}: s3.createMultipartUpload(): err: "+ err);
+
+					_fail();
+					return;
+				}
+
+				const upload_id = data.UploadId;
+
+				if (upload_id)
+				{
+					_succeed(upload_id);
+				}
+				else
+				{
+					log.err("${METHOD_NAME}: s3.createMultipartUpload(): unable to extract upload_id !");
+					_fail();
+				}
+			});
+		}
+
+		const _succeed = (
+			upload_id: string
+		): void =>
+		{
+			log.err(`${METHOD_NAME}._succeed()`);
+			
+			this.setState((current)=> {
+				
+				const next = _.cloneDeep(current) as ISendState;
+				if (next.upload_state)
+				{
+					const m_state = next.upload_state.files[upload_index].mulitpart_state!;
+					m_state.upload_id = upload_id;
+				}
+
+				return next;
+
+			}, ()=> {
+
+				this.uploadNext();
+			});
+		}
+
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+
+			this.uploadFail(upload_err_fatal);
+		}
+
+		_fetchCredentials();
+	}
+
+	protected uploadFile_multipart_part(
+		in_state: {
+			upload_state : UploadState,
+			upload_index : number,
+			part_index   : number,
+		}
+	): void
+	{
+		const METHOD_NAME = `uploadFile_multipart_part(${in_state.part_index})`;
+		log.debug(METHOD_NAME);
+
+		const {upload_state, upload_index, part_index} = in_state;
+		const file_state = upload_state.files[upload_index];
+		const multipart_state = file_state.mulitpart_state!;
+
+		multipart_state.in_progress[part_index] = true;
+
+		const _readChunk = (): void =>
+		{
+			log.debug(`${METHOD_NAME}._readChunk()`);
+
+			const file = this.state.file_list[upload_index];
+
+			const file_stream = new FileReader();
+			file_stream.addEventListener("loadend", ()=>{
+
+				const file_data = file_stream.result as ArrayBuffer|null;
+				if (file_data == null) {
+					_fail(`Unable to read file: ${file.name}`);
+				}
+				else {
+					_fetchCredentials({file_data})
+				}
+			});
+
+			const headerSize = 64;
+
+			const thumbnail = file_state.file_preview;
+			const thumbnailSize = thumbnail ? thumbnail.byteLength : 0;
+
+			const offset = headerSize + thumbnailSize;
+
+			const slice_start = offset + (multipart_state.part_size * part_index);
+			const slice_end = Math.min(slice_start + multipart_state.part_size, file.size);
+
+			file_stream.readAsArrayBuffer(file.slice(slice_start, slice_end));
+		}
+
+		const _fetchCredentials = (
+			state: {
+				file_data : ArrayBuffer
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._fetchCredentials()`);
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					_fail();
+				}
+			});
+		}
+
+		const _performUpload = (
+			state: {
+				file_data   : ArrayBuffer,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._performUpload()`);
+
+			const file = this.state.file_list[upload_index];
+			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+
+			const s3 = new S3({
+				credentials : state.credentials,
+				region      : 'us-west-2'
+			});
+
+			const upload = s3.uploadPart({
+				Bucket     : 'cloud.storm4.test',
+				Key        : key,
+				PartNumber : part_index,
+				UploadId   : multipart_state.upload_id!,
+				Body       : state.file_data
+			});
+
+			upload.on("httpUploadProgress", (progress)=> {
+
+				log.debug(`${METHOD_NAME}.onprogress: loaded(${progress.loaded}) total(${progress.total})`);
+
+				const upload_progress = Math.round(100 * (progress.loaded / progress.total));
+				this.setState({
+					upload_progress
+				});
+			});
+		/*
+			upload.send((err, data)=> {
+
+				// Todo...
+			});
+		*/
+		}
+
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Step-specific failure code
+			multipart_state.in_progress[part_index] = false;
+
+			this.uploadFail(upload_err_fatal);
+		}
+
+		_readChunk();
+	}
+
+	protected uploadFile_multipart_complete(
+		in_state: {
+			upload_state : UploadState,
+			upload_index : number
+		}
+	): void
+	{
+		const METHOD_NAME = "uploadFile_multipart_complete()";
+		log.debug(METHOD_NAME);
+
+		// Todo...
+	}
+
+	protected uploadFiles_pollStatus(
 		in_state: {
 			upload_state : UploadState
 		}
-	): void =>
+	): void
 	{
 		const METHOD_NAME = "uploadFiles_pollStatus()";
 		log.debug(`${METHOD_NAME}`);
@@ -1616,12 +2071,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected uploadMessage = (
+	protected uploadMessage(
 		in_state: {
 			upload_state : UploadState
 			msg_state    : UploadState_Msg
 		}
-	): void =>
+	): void
 	{
 		const METHOD_NAME = "uploadMessage()";
 		log.debug(`${METHOD_NAME}`);
@@ -1704,7 +2159,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
-					this.uploadFail();
+					_fail();
 				}
 			});
 		}
@@ -1736,7 +2191,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				if (err)
 				{
 					log.err("s3.upload.send(): err: "+ err);
-					this.uploadFail();
+					_fail();
 				}
 				else
 				{
@@ -1767,11 +2222,18 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+			
+			this.uploadFail(upload_err_fatal);
+		}
+
 		_generateRcrdData();
 	}
 
-	protected uploadMessage_pollStatus = (
-	): void =>
+	protected uploadMessage_pollStatus(): void
 	{
 		const METHOD_NAME = "uploadMessage_pollStatus()";
 		log.debug(`${METHOD_NAME}`);
@@ -1783,9 +2245,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected uploadFail = (
+	protected uploadFail(
 		upload_err_fatal ?: string
-	): void =>
+	): void
 	{
 		log.err(`uploadFail()`);
 
