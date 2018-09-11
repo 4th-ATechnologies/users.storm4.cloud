@@ -1,4 +1,5 @@
 import * as _ from 'lodash';
+import * as aws4 from 'aws4';
 import * as filesize from 'filesize';
 import * as merkle_tree_gen from 'merkle-tree-gen';
 import * as queryString from 'query-string';
@@ -383,7 +384,8 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 interface UploadState_Multipart {
 	part_size     : number,
 	num_parts     : number,
-	upload_id    ?: string,
+	upload_id     : string|null,
+	has_completed : boolean
 	current_part  : number,
 	progress: {
 		[index: number]: number|undefined
@@ -1610,7 +1612,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
 			const upload_index = this.state.upload_index;
+			
 			const file = this.state.file_list[upload_index];
+			const file_state = this.state.upload_state!.files[upload_index];
 
 			let multipart_state: UploadState_Multipart|null = null;
 
@@ -1621,7 +1625,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 			// - each part (excluding the last) must be >= 5 MiB
 			// - there can be at most 10,000 parts
 
-			if (file.size >= (1024 * 1024 * 10))
+			const encrypted_file_size = this.getEncryptedFileSize({file, file_state});
+			log.debug("encrypted_file_size: "+ encrypted_file_size)
+
+			if (encrypted_file_size >= (1024 * 1024 * 5)) // 5 MiB is absolute minimum
 			{
 				let part_size = (1024 * 1024 * 5);
 				let num_parts = Math.ceil(file.size / part_size);
@@ -1635,9 +1642,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 				multipart_state = {
 					part_size,
 					num_parts,
-					current_part : 0,
-					progress     : {},
-					eTags        : {}
+					upload_id     : null,
+					has_completed : false,
+					current_part  : 0,
+					progress      : {},
+					eTags         : {}
 				};
 
 				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: multipart_state: ${multipart_state}`);
@@ -1653,16 +1662,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				const next = _.cloneDeep(current) as ISendState;
 
-				const file_state = next.upload_state!.files[next.upload_index];
+				const _file_state = next.upload_state!.files[next.upload_index];
 
 				if (file_preview) {
-					file_state.file_preview = file_preview;
+					_file_state.file_preview = file_preview;
 				}
 				else {
-					file_state.file_preview = new ArrayBuffer(0);
+					_file_state.file_preview = new ArrayBuffer(0);
 				}
 
-				file_state.multipart_state = multipart_state || undefined;
+				_file_state.multipart_state = multipart_state || undefined;
 
 				return next;
 
@@ -1897,7 +1906,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const MAX_CONCURRENCY = this.isProbablyMobile() ? 1 : 2;
 				const SLOTS = MAX_CONCURRENCY - parts_flight.length;
 
-				for (let i = 0; i < SLOTS; i++)
+				for (let i = 0; i < SLOTS && i < parts_available.length; i++)
 				{
 					const part_index = parts_available[i];
 
@@ -2226,7 +2235,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const parts: string[] = [];
 			for (let i = 0; i < multipart_state.num_parts; i++)
 			{
-				let eTag = multipart_state.eTags[i];
+				const eTag = multipart_state.eTags[i];
 				parts.push(eTag || "");
 			}
 
@@ -2278,14 +2287,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const url = `https://${host}${path}`;
 
-			fetch(url, {
+			const options = aws4.sign({
+				host   : host,
+				path   : path,
 				method : 'POST',
 				body   : state.json_str,
-				headers: {
+				headers : {
 					"Content-Type": "application/json"
 				}
-	
-			}).then((response)=> {
+
+			}, state.credentials);
+
+			log.debug(`aws4.sign() => `+ JSON.stringify(options, null, 2));
+
+			fetch(url, options).then((response)=> {
 
 				if (response.status == 200) {
 					return response.json();
@@ -2297,13 +2312,48 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}).then((json)=> {
 
 				const response = json as S4MultipartCompleteResponse;
+
+				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(response, null, 2));
 				
+				if (response.status_code == 200)
+				{
+					log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: response.status_code: `+ response.status_code);
+				
+					_fail();
+				}
+				else
+				{
+					_succeed();
+				}
 
 			}).catch((err)=> {
 
 				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: err: `+ err);
 
 				_fail();
+			});
+		}
+
+		const _succeed = (
+		): void =>
+		{
+			const SUB_METHOD_NAME = "_succeed()"
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			this.setState((current)=> {
+
+				const next = _.cloneDeep(current) as ISendState;
+				
+				const upload_index = next.upload_index;
+				const _multipart_state = next.upload_state!.files[upload_index].multipart_state!;
+
+				_multipart_state.has_completed = true;
+				
+				return next;
+				
+			}, ()=> {
+
+				this.uploadNext();
 			});
 		}
 
