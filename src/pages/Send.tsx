@@ -23,9 +23,6 @@ import * as users_cache from '../util/UsersCache';
 import {Logger} from '../util/Logging'
 
 import {
-	UserInfo,
-	Auth0Identity,
-	Auth0Profile,
 	UserProfile,
 	PubKey,
 	MerkleTreeFile,
@@ -35,7 +32,9 @@ import {
 	S4Rcrd_Data_Message,
 	make_attachment,
 	S4MultipartCompleteRequest,
-	S4MultipartCompleteResponse
+	S4MultipartCompleteResponse,
+	S4PollRequest,
+	S4PollResponse
 } from '../models/models'
 
 // Material UI
@@ -397,13 +396,16 @@ interface UploadState_Multipart {
 interface UploadState_File {
 	encryption_key     : Uint8Array,
 	random_filename    : string,
-	request_id_rcrd    : string,
-	request_id_data    : string,
 	file_preview       : ArrayBuffer|null,
 	has_uploaded_rcrd  : boolean,
 	unipart_progress   : number,
 	multipart_state   ?: UploadState_Multipart,
-	anonymous_id      ?: string,
+	request_id_rcrd    : string,
+	request_id_data    : string,
+	anonymous_id_rcrd ?: string,
+	anonymous_id_data ?: string,
+	eTag_rcrd         ?: string,
+	eTag_data         ?: string,
 	cloud_id          ?: string,
 }
 
@@ -602,47 +604,31 @@ class Send extends React.Component<ISendProps, ISendState> {
 		return `com.4th-a.storm4/temp/${file_state.random_filename}`;
 	}
 
-	protected getStagingPathForFile = (
+	protected getStagingPathForFile(
 		options: {
-			upload_state : UploadState,
-			file_state   : UploadState_File,
-			file         : ImageFile,
-			ext          : "rcrd"|"data"
+			file_state : UploadState_File,
+			ext        : "rcrd"|"data"
 		}
-	): string =>
+	): string
 	{
-		// ----- TEMP CODE -----
-		// Replace me with proper staging path for user bucket.
+		const {file_state, ext} = options;
 
-		const {upload_state, file_state, file, ext} = options;
-
-		const upload_id = upload_state.upload_id;
 		const random_filename = file_state.random_filename;
-		const cleartext_filename = file.name;
+		const request_id = (ext == "rcrd") ? file_state.request_id_rcrd : file_state.request_id_data;
 
-		return `staging/${upload_id}_${random_filename}_${cleartext_filename}.${ext}`;
-
-		//
-		// ----- TEMP CODE -----
+		return `staging/2/com.4th-a.storm4/put-if-nonexistent/temp/${random_filename}.${ext}/${request_id}`;
 	}
 
 	protected getStagingPathForMsg(
 		options: {
-			upload_state : UploadState,
-			msg_state    : UploadState_Msg
+			msg_state: UploadState_Msg
 		}
 	): string
 	{
-		// ----- TEMP CODE -----
-		// Replace me with proper staging path for user bucket.
-
-		const upload_id = options.upload_state.upload_id;
 		const random_filename = options.msg_state.random_filename;
-		
-		return `staging/${upload_id}_${random_filename}_msg.rcrd`;
+		const request_id = options.msg_state.request_id_rcrd;
 
-		//
-		// ----- TEMP CODE -----
+		return `staging/2/com.4th-a.storm4/put-if-nonexistent/temp/${random_filename}.rcrd/${request_id}`;
 	}
 
 	protected getEncryptedFileSize(
@@ -1468,13 +1454,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
+			const user_profile = this.state.user_profile!;
+
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
-
-			const file = this.state.file_list[upload_index];
 			const file_state = upload_state.files[upload_index];
 
-			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "rcrd"});
+			const key = this.getStagingPathForFile({file_state, ext: "rcrd"});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -1482,7 +1468,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 
 			const upload = s3.upload({
-				Bucket        : 'cloud.storm4.test',
+				Bucket        : user_profile.s4.bucket,
 				Key           : key,
 				Body          : state.rcrd_str
 			});
@@ -1506,7 +1492,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			const SUB_METHOD_NAME = "_succeed()"
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
-
+/*
 			this.setState((current)=> {
 
 				const next = _.cloneDeep(current) as ISendState;
@@ -1522,6 +1508,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				this.uploadNext();
 			});
+*/
 		}
 
 		const _fail = (upload_err_fatal?: string): void => {
@@ -1780,6 +1767,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
+			const user_profile = this.state.user_profile!;
+
 			const upload_index = this.state.upload_index;
 			const file: ImageFile = this.state.file_list[upload_index];			
 			
@@ -1797,7 +1786,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const body = util.concatBuffers([file_header, file_preview, file_data]);
 
-			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+			const key = this.getStagingPathForFile({file_state, ext: "data"});
 			
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -1805,7 +1794,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 
 			const upload = s3.putObject({
-				Bucket : 'cloud.storm4.test',
+				Bucket : user_profile.s4.bucket,
 				Key    : key,
 				Body   : body,
 			});
@@ -1972,13 +1961,15 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._performRequest()`);
 
+			const user_profile = this.state.user_profile!;
+
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
 
 			const file = this.state.file_list[upload_index];
 			const file_state = upload_state.files[upload_index];
 
-			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+			const key = this.getStagingPathForFile({file_state, ext: "data"});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -1986,7 +1977,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 
 			s3.createMultipartUpload({
-				Bucket : 'cloud.storm4.test',
+				Bucket : user_profile.s4.bucket,
 				Key    : key
 			
 			}, (err, data)=> {
@@ -2118,6 +2109,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
+			const user_profile = this.state.user_profile!;
+
 			const upload_index = this.state.upload_index;
 			const file = this.state.file_list[upload_index];
 			const upload_state = this.state.upload_state!;
@@ -2138,7 +2131,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				body = util.concatBuffers([header, file_state.file_preview, state.file_data])
 			}
 
-			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+			const key = this.getStagingPathForFile({file_state, ext: "data"});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -2146,7 +2139,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 
 			const upload = s3.uploadPart({
-				Bucket     : 'cloud.storm4.test',
+				Bucket     : user_profile.s4.bucket,
 				Key        : key,
 				PartNumber : part_index+1, // <= not zero-based: [1, 10,000]
 				UploadId   : multipart_state.upload_id!,
@@ -2243,6 +2236,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
+			const user_profile = this.state.user_profile!;
+
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
 
@@ -2251,7 +2246,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const file_state = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
 
-			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+			const key = this.getStagingPathForFile({file_state, ext: "data"});
 
 			const parts: string[] = [];
 			for (let i = 0; i < multipart_state.num_parts; i++)
@@ -2261,7 +2256,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 
 			const json: S4MultipartCompleteRequest = {
-				bucket       : 'cloud.storm4.test',
+				bucket       : user_profile.s4.bucket,
 				staging_path : key,
 				upload_id    : multipart_state.upload_id || "",
 				parts        : parts
@@ -2391,27 +2386,139 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = "uploadFiles_pollStatus()";
 		log.debug(`${METHOD_NAME}`);
 
-		
+		const _generateJSON = (): void => {
+			const SUB_METHOD_NAME = "_generateRcrdData()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-		this.setState((current)=> {
+			const upload_state = this.state.upload_state!;
 
-			const next = _.cloneDeep(current) as ISendState;
-			if (next.upload_state)
+			const json: S4PollRequest = {
+				requests: []
+			};
+
+			for (const file_state of upload_state.files)
 			{
-				for (const file_state of next.upload_state.files)
+				if (file_state.eTag_rcrd == null)
 				{
-					file_state.cloud_id = "fake_it_til_we_make_it";
-				}
+					const anonymous_id = file_state.anonymous_id_rcrd || "";
+					const request_id   = file_state.request_id_rcrd   || "";
 
-				next.upload_state.done_polling = true;
+					json.requests.push([anonymous_id, request_id])
+				}
+				if (file_state.eTag_data == null)
+				{
+					const anonymous_id = file_state.anonymous_id_data || "";
+					const request_id   = file_state.request_id_data   || "";
+
+					json.requests.push([anonymous_id, request_id])
+				}
 			}
 
-			return next;
+			const max_requests = 50;
+			if (json.requests.length > max_requests) {
+				json.requests = json.requests.slice(0, max_requests);
+			}
 
-		}, ()=> {
+			const json_str = JSON.stringify(json, null, 2)
 
-			this.uploadNext();
-		});
+			// Next step
+			_fetchCredentials({json_str});
+		}
+
+		const _fetchCredentials = (
+			state: {
+				json_str : string
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._fetchCredentials()`);
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					_fail();
+				}
+			});
+		}
+
+		const _performUpload = (
+			state: {
+				json_str    : string,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			const SUB_METHOD_NAME = "_performUpload()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const host = api_gateway.getHost();
+			const path = api_gateway.getPath("/poll-request");
+
+			const url = `https://${host}${path}`;
+
+			const options = aws4.sign({
+				host   : host,
+				path   : path,
+				method : 'POST',
+				body   : state.json_str,
+				headers : {
+					"Content-Type": "application/json"
+				}
+
+			}, state.credentials);
+
+			log.debug(`aws4.sign() => `+ JSON.stringify(options, null, 2));
+
+			fetch(url, options).then((response)=> {
+
+				if (response.status == 200) {
+					return response.json();
+				}
+				else {
+					throw new Error("Server returned status code: "+ response.status);
+				}
+
+			}).then((json)=> {
+
+				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(json, null, 2));
+
+				// TODO: Implement me
+
+			}).catch((err)=> {
+
+				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: err: `+ err);
+
+				// TODO: Implement me
+			});
+		}
+
+		const _succeed = (): void => {
+			log.err(`${METHOD_NAME}._succeed()`);
+			
+			this.setState((current)=> {
+				
+				const next = _.cloneDeep(current) as ISendState;
+				next.upload_state!.done_polling = true;
+
+				return next;
+
+			}, ()=> {
+
+				this.uploadNext();
+			});
+		}
+
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+			
+			this.uploadFail(upload_err_fatal);
+		}
 	}
 
 	protected uploadMessage(
@@ -2516,7 +2623,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._performUpload()`);
 
-			const key = this.getStagingPathForMsg({upload_state, msg_state});
+			const user_profile = this.state.user_profile!;
+
+			const key = this.getStagingPathForMsg({msg_state});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -2524,9 +2633,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 
 			const upload = s3.upload({
-				Bucket        : 'cloud.storm4.test',
-				Key           : key,
-				Body          : state.rcrd_str
+				Bucket : user_profile.s4.bucket,
+				Key    : key,
+				Body   : state.rcrd_str
 			});
 
 			upload.send((err, data)=> {

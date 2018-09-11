@@ -153,3 +153,13 @@ export interface S4MultipartCompleteResponse {
 	status_code : number,
 	duplicate   : boolean
 }
+
+export interface S4PollRequest {
+	requests: Array<[string, string]>
+}
+
+export interface S4PollResponse {
+	
+}
+
+
