@@ -14,6 +14,7 @@ import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 import {encode as utf8_encode} from 'utf8';
 
+import * as api_gateway from '../util/APIGateway';
 import * as credentials_helper from '../util/Credentials';
 import * as util from '../util/Util';
 import * as users_cache from '../util/UsersCache';
@@ -31,7 +32,9 @@ import {
 	S4Rcrd,
 	S4Rcrd_Metadata,
 	S4Rcrd_Data_Message,
-	make_attachment
+	make_attachment,
+	S4MultipartCompleteRequest,
+	S4MultipartCompleteResponse
 } from '../models/models'
 
 // Material UI
@@ -270,7 +273,6 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	uploadInfo_text_separate: {
 		flexBasis: 'auto',
 		marginTop: theme.spacing.unit,
-		marginBottom: theme.spacing.unit
 	},
 	uploadInfo_button: {
 		marginTop: theme.spacing.unit * 4
@@ -383,10 +385,10 @@ interface UploadState_Multipart {
 	num_parts     : number,
 	upload_id    ?: string,
 	current_part  : number,
-	in_progress   : {
-		[index: number]: boolean|undefined
+	progress: {
+		[index: number]: number|undefined
 	},
-	eTags         : {
+	eTags: {
 		[index: number]: string|undefined
 	}
 }
@@ -398,7 +400,8 @@ interface UploadState_File {
 	request_id_data    : string,
 	file_preview       : ArrayBuffer|null,
 	has_uploaded_rcrd  : boolean,
-	mulitpart_state   ?: UploadState_Multipart,
+	unipart_progress   : number,
+	multipart_state   ?: UploadState_Multipart,
 	anonymous_id      ?: string,
 	cloud_id          ?: string,
 }
@@ -470,7 +473,6 @@ interface ISendState {
 	// 
 	is_uploading      : boolean,
 	upload_index      : number,
-	upload_progress   : number,
 	upload_success    : boolean,
 	upload_err_retry  : number|null,
 	upload_err_fatal  : string|null
@@ -510,7 +512,6 @@ function getStartingState(): ISendState {
 
 		is_uploading      : false,
 		upload_index      : 0,
-		upload_progress   : 0,
 		upload_success    : false,
 		upload_err_retry  : null,
 		upload_err_fatal  : null,
@@ -528,8 +529,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	protected test_count = 0;
 
-	protected isProbablyMobile = (): boolean => {
-
+	protected isProbablyMobile(): boolean
+	{
 		const user_agent = navigator.userAgent;
 
 		const regex_android = new RegExp(/Android/i);
@@ -624,12 +625,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// ----- TEMP CODE -----
 	}
 
-	protected getStagingPathForMsg = (
+	protected getStagingPathForMsg(
 		options: {
 			upload_state : UploadState,
 			msg_state    : UploadState_Msg
 		}
-	): string =>
+	): string
 	{
 		// ----- TEMP CODE -----
 		// Replace me with proper staging path for user bucket.
@@ -641,6 +642,71 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		//
 		// ----- TEMP CODE -----
+	}
+
+	protected getEncryptedFileSize(
+		options: {
+			file       : ImageFile,
+			file_state : UploadState_File
+		}
+	): number
+	{
+		const {file_preview} = options.file_state;
+
+		const header_size    = 64;
+		const thumbnail_size = file_preview ? file_preview.byteLength : 0;
+		const file_size      = options.file.size;
+
+		const unencrypted = header_size + thumbnail_size + file_size;
+
+		const BLOCK_SIZE = 1024;
+		const blocks = Math.ceil(unencrypted / BLOCK_SIZE);
+
+		return (blocks *  BLOCK_SIZE);
+	}
+
+	protected getProgress(
+		options: {
+			file       : ImageFile,
+			file_state : UploadState_File
+		}
+	): number
+	{
+		const {file, file_state} = options;
+		
+		let progress: number = 0;
+		if (file_state.multipart_state)
+		{
+			const multipart_state = file_state.multipart_state;
+
+			const bytes_total = this.getEncryptedFileSize(options);
+			let bytes_uploaded = 0;
+
+			for (let i = 0; i < multipart_state.num_parts; i++)
+			{
+				const part_progress = multipart_state.progress[i];
+				if (part_progress != null)
+				{
+					let part_size: number;
+					if (i == (multipart_state.num_parts-1)) {
+						part_size = (bytes_total - (multipart_state.part_size * i));
+					}
+					else {
+						part_size = multipart_state.part_size;
+					}
+
+					bytes_uploaded += Math.floor(part_progress * part_size);
+				}
+			}
+
+			progress = (bytes_uploaded / bytes_total);
+		}
+		else
+		{
+			progress = file_state.unipart_progress;
+		}
+
+		return progress;
 	}
 
 	protected fetchUserProfile = ()=> {
@@ -1248,6 +1314,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					request_id_data,
 					file_preview      : null,
 					has_uploaded_rcrd : false,
+					unipart_progress  : 0
 				};
 
 				upload_state.files.push(file_state);
@@ -1286,10 +1353,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const file_state = upload_state.files[upload_index];
 
 				if ( ! file_state.has_uploaded_rcrd) {
-					this.uploadRcrd({upload_state, upload_index});
+					this.uploadRcrd();
 				}
 				else {
-					this.uploadFile({upload_state, upload_index});
+					this.uploadFile();
 				}
 			}
 			else if (!upload_state.done_polling)
@@ -1314,22 +1381,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	protected uploadRcrd(
-		in_state: {
-			upload_state : UploadState,
-			upload_index : number
-		}
 	): void
 	{
 		const METHOD_NAME = "uploadRcrd()";
 		log.debug(METHOD_NAME);
 
-		const {upload_state, upload_index} = in_state;
-
-		const file = this.state.file_list[upload_index];
-		const file_state = upload_state.files[upload_index];
-
 		const _generateRcrdData = (): void => {
-			log.debug(`${METHOD_NAME}._generateRcrdData()`);
+			const SUB_METHOD_NAME = "_generateRcrdData()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const upload_index = this.state.upload_index;
+			const upload_state = this.state.upload_state!;
+
+			const file = this.state.file_list[upload_index];
+			const file_state = upload_state.files[upload_index];
 
 			const json: S4Rcrd = {
 				version  : 3,
@@ -1399,7 +1464,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug(`${METHOD_NAME}._performUpload()`);
+			const SUB_METHOD_NAME = "_performUpload()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const upload_index = this.state.upload_index;
+			const upload_state = this.state.upload_state!;
+
+			const file = this.state.file_list[upload_index];
+			const file_state = upload_state.files[upload_index];
 
 			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "rcrd"});
 
@@ -1418,7 +1490,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				if (err)
 				{
-					log.err("s3.upload.send(): err: "+ err);
+					log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: s3.upload.send(): err: `+ err);
 					_fail();
 				}
 				else
@@ -1431,13 +1503,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _succeed = (
 		): void =>
 		{
-			log.debug(`${METHOD_NAME}._succeed()`);
+			const SUB_METHOD_NAME = "_succeed()"
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const new_upload_state = _.cloneDeep(upload_state);
-			new_upload_state.files[upload_index].has_uploaded_rcrd = true;
+			this.setState((current)=> {
 
-			this.setState({
-				upload_state: new_upload_state
+				const next = _.cloneDeep(current) as ISendState;
+				
+				const upload_index = next.upload_index;
+				const _file_state = next.upload_state!.files[upload_index];
+
+				_file_state.has_uploaded_rcrd = true;
+				
+				return next;
 				
 			}, ()=> {
 
@@ -1457,22 +1535,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	protected uploadFile(
-		in_state: {
-			upload_state : UploadState,
-			upload_index : number
-		}
 	): void
 	{
 		const METHOD_NAME = "uploadFile()";
 		log.debug(`${METHOD_NAME}`);
 
-		const {upload_state, upload_index} = in_state;
-
-		const file = this.state.file_list[upload_index];
-		const file_state = upload_state.files[upload_index];
-
 		const _readThumbnail = (): void => {
-			log.debug(`${METHOD_NAME}._readThumbnail()`);
+			const SUB_METHOD_NAME = "_readThumbnail()"
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const upload_index = this.state.upload_index;
+			const file = this.state.file_list[upload_index];
 
 			// file.preview is a blob url.
 			// For example: blob:http://localhost:3000/478850dc-08cf-4929-aa8a-af1890ac0350
@@ -1529,19 +1602,15 @@ class Send extends React.Component<ISendProps, ISendState> {
 			img.src = file.preview;
 		}
 
-		const _determineMultipart = (file_preview: ArrayBuffer|null): void => {
-			log.debug(`${METHOD_NAME}._determineMultipart()`);
+		const _determineMultipart = (
+			file_preview: ArrayBuffer|null
+		): void =>
+		{
+			const SUB_METHOD_NAME = "_determineMultipart()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			if (file_preview) {
-				file_state.file_preview = file_preview;
-			}
-			else {
-				file_state.file_preview = new ArrayBuffer(0);
-			}
-
-			if (file.preview) {
-				window.URL.revokeObjectURL(file.preview);
-			}
+			const upload_index = this.state.upload_index;
+			const file = this.state.file_list[upload_index];
 
 			let multipart_state: UploadState_Multipart|null = null;
 
@@ -1567,53 +1636,89 @@ class Send extends React.Component<ISendProps, ISendState> {
 					part_size,
 					num_parts,
 					current_part : 0,
-					in_progress  : {},
+					progress     : {},
 					eTags        : {}
 				};
+
+				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: multipart_state: ${multipart_state}`);
+			}
+			else
+			{
+				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: wtf C`);
 			}
 
-			file_state.mulitpart_state = multipart_state || undefined;
+			// Go through setState so the UI will update
+			// 
+			this.setState((current)=> {
 
-			// Next step
-			_dispatch();
+				const next = _.cloneDeep(current) as ISendState;
+
+				const file_state = next.upload_state!.files[next.upload_index];
+
+				if (file_preview) {
+					file_state.file_preview = file_preview;
+				}
+				else {
+					file_state.file_preview = new ArrayBuffer(0);
+				}
+
+				file_state.multipart_state = multipart_state || undefined;
+
+				return next;
+
+			}, ()=> {
+
+				if (file.preview) {
+					window.URL.revokeObjectURL(file.preview);
+				}
+
+				// Next step
+				_dispatch();
+			});
 		}
 
 		const _dispatch = () => {
-			log.debug(`${METHOD_NAME}._dispatch()`);
+			const SUB_METHOD_NAME = "_dispatch()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			if (file_state.mulitpart_state) {
-				this.uploadFile_multipart(in_state);
+			const upload_index = this.state.upload_index;
+			const file_state = this.state.upload_state!.files[upload_index];
+
+			if (file_state.multipart_state) {
+				this.uploadFile_multipart();
 			}
 			else {
-				this.uploadFile_unipart(in_state)
+				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: file_state: ${JSON.stringify(file_state, null, 2)}`);
+				this.uploadFile_unipart()
 			}
 		}
 
-		if (file_state.file_preview == null) {
-			_readThumbnail();
-		}
-		else {
-			_dispatch();
+		{ // Scoping
+
+			const upload_index = this.state.upload_index;
+			const file_state = this.state.upload_state!.files[upload_index];
+
+			if (file_state.file_preview == null) {
+				_readThumbnail();
+			}
+			else {
+				_dispatch();
+			}
 		}
 	}
 
-	protected uploadFile_unipart (
-		in_state: {
-			upload_state : UploadState,
-			upload_index : number
-		}
+	protected uploadFile_unipart(
 	): void
 	{
 		const METHOD_NAME = "uploadFile_unipart()";
 		log.debug(`${METHOD_NAME}`);
 
-		const {upload_state, upload_index} = in_state;
-
-		const file: ImageFile = this.state.file_list[upload_index];
-		const file_state = upload_state.files[upload_index];
-
 		const _readFile = (): void => {
-			log.debug(`${METHOD_NAME}._readFile()`);
+			const SUB_METHOD_NAME = "_readFile()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const upload_index = this.state.upload_index;
+			const file: ImageFile = this.state.file_list[upload_index];			
 
 			const file_stream = new FileReader();
 			file_stream.addEventListener("loadend", ()=>{
@@ -1657,7 +1762,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug(`${METHOD_NAME}._performUpload()`);
+			const SUB_METHOD_NAME = "_performUpload()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const upload_index = this.state.upload_index;
+			const file: ImageFile = this.state.file_list[upload_index];			
+			
+			const upload_state = this.state.upload_state!;
+			const file_state = upload_state.files[upload_index];
 
 			const {file_preview} = file_state;
 			const {file_data} = state;
@@ -1685,11 +1797,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			upload.on("httpUploadProgress", (progress)=> {
 
-				log.debug(`progress: loaded(${progress.loaded}) total(${progress.total})`);
+				const upload_progress = (progress.loaded / progress.total);
+				this.setState((current)=> {
+					const next = _.cloneDeep(current) as ISendState;
+					next.upload_state!.files[upload_index].unipart_progress = upload_progress;
 
-				const upload_progress = Math.round(100 * (progress.loaded / progress.total));
-				this.setState({
-					upload_progress
+					return next;
 				});
 			});
 
@@ -1715,7 +1828,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 				
 				const next = _.cloneDeep(current) as ISendState;
 				next.upload_index++;
-				next.upload_progress = 0;
 
 				return next;
 
@@ -1737,77 +1849,75 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	protected uploadFile_multipart(
-		in_state: {
-			upload_state : UploadState,
-			upload_index : number
-		}
 	): void
 	{
 		const METHOD_NAME = "uploadFile_multipart()";
 		log.debug(`${METHOD_NAME}`);
 
-		const {upload_state, upload_index} = in_state;
+		const upload_index = this.state.upload_index;
+		const upload_state = this.state.upload_state!;
 
-		const file = this.state.file_list[upload_index];
 		const file_state = upload_state.files[upload_index];
-		const multipart_state = file_state.mulitpart_state!;
+		const multipart_state = file_state.multipart_state!;
 
 		if (multipart_state.upload_id == null)
 		{
-			this.uploadFile_multipart_initialize({upload_state, upload_index})
+			this.uploadFile_multipart_initialize()
 		}
 		else
 		{
 			// Look for remaining parts we still need to upload.
 
-			const available_parts: number[] = [];
+			const parts_done: number[] = [];
+			const parts_flight: number[] = [];
+			const parts_available: number[] = [];
 
 			for (let i = 0; i < multipart_state.num_parts; i++)
 			{
 				if (multipart_state.eTags[i] != null) {
 					// Part is already uploaded
+					parts_done.push(i);
 				}
-				else if (multipart_state.in_progress[i] == true) {
+				else if (multipart_state.progress[i] != null) {
 					// Part is being uploaded currently
+					parts_flight.push(i);
 				}
 				else {
-					available_parts.push(i);
+					parts_available.push(i);
 				}
 			}
 
-			log.debug(`${METHOD_NAME}: available_parts: ${JSON.stringify(available_parts, null, 2)}`);
+			log.debug(`${METHOD_NAME}: parts_flight: ${parts_flight}`);
+			log.debug(`${METHOD_NAME}: parts_available: ${parts_available}`);
 
-			if (available_parts.length == 0)
-			{
-				// We're ready to complete the multipart upload
-			}
-			else
+			if (parts_available.length > 0)
 			{
 				// We still have parts that need uploading.
 
 				const MAX_CONCURRENCY = this.isProbablyMobile() ? 1 : 2;
+				const SLOTS = MAX_CONCURRENCY - parts_flight.length;
 
-				for (let i = 0; i < MAX_CONCURRENCY; i++)
+				for (let i = 0; i < SLOTS; i++)
 				{
-					const part_index = available_parts[i];
+					const part_index = parts_available[i];
 
-				//	this.uploadFile_multipart_part({upload_state, upload_index, part_index});
+					this.uploadFile_multipart_part(part_index);
 				}
+			}
+			else if ((parts_flight.length == 0) && (parts_done.length == multipart_state.num_parts))
+			{
+				// We're ready to complete the multipart upload
+
+				this.uploadFile_multipart_complete();
 			}
 		}
 	}
 
 	protected uploadFile_multipart_initialize(
-		in_state: {
-			upload_state : UploadState,
-			upload_index : number,
-		}
 	): void
 	{
 		const METHOD_NAME = "uploadFile_multipart_initialize()";
 		log.debug(METHOD_NAME);
-
-		const {upload_state, upload_index} = in_state;
 
 		const _fetchCredentials = (): void => {
 			log.debug(`${METHOD_NAME}._fetchCredentials()`);
@@ -1831,6 +1941,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		): void =>
 		{
 			log.debug(`${METHOD_NAME}._performRequest()`);
+
+			const upload_index = this.state.upload_index;
+			const upload_state = this.state.upload_state!;
 
 			const file = this.state.file_list[upload_index];
 			const file_state = upload_state.files[upload_index];
@@ -1879,11 +1992,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			this.setState((current)=> {
 				
 				const next = _.cloneDeep(current) as ISendState;
-				if (next.upload_state)
-				{
-					const m_state = next.upload_state.files[upload_index].mulitpart_state!;
-					m_state.upload_id = upload_id;
-				}
+				
+				const upload_index = next.upload_index;
+				const multipart_state = next.upload_state!.files[upload_index].multipart_state!;
+
+				multipart_state.upload_id = upload_id;
 
 				return next;
 
@@ -1905,27 +2018,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	protected uploadFile_multipart_part(
-		in_state: {
-			upload_state : UploadState,
-			upload_index : number,
-			part_index   : number,
-		}
+		part_index: number
 	): void
 	{
-		const METHOD_NAME = `uploadFile_multipart_part(${in_state.part_index})`;
+		const METHOD_NAME = `uploadFile_multipart_part(${part_index})`;
 		log.debug(METHOD_NAME);
-
-		const {upload_state, upload_index, part_index} = in_state;
-		const file_state = upload_state.files[upload_index];
-		const multipart_state = file_state.mulitpart_state!;
-
-		multipart_state.in_progress[part_index] = true;
 
 		const _readChunk = (): void =>
 		{
 			log.debug(`${METHOD_NAME}._readChunk()`);
 
+			const upload_index = this.state.upload_index;
 			const file = this.state.file_list[upload_index];
+			const file_state = this.state.upload_state!.files[upload_index];
+			const multipart_state = file_state.multipart_state!;
 
 			const file_stream = new FileReader();
 			file_stream.addEventListener("loadend", ()=>{
@@ -1979,9 +2085,29 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		): void =>
 		{
-			log.debug(`${METHOD_NAME}._performUpload()`);
+			const SUB_METHOD_NAME = "_performUpload()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
+			const upload_index = this.state.upload_index;
 			const file = this.state.file_list[upload_index];
+			const upload_state = this.state.upload_state!;
+			const file_state = upload_state.files[upload_index];
+			const multipart_state = file_state.multipart_state!;
+
+			let body: Uint8Array;
+			if (part_index > 0) {
+				body = new Uint8Array(state.file_data);
+			}
+			else {
+				const header = util.makeCloudFileHeader({
+					byteLength_metadata  : 0,
+					byteLength_thumbnail : file_state.file_preview ? file_state.file_preview.byteLength : 0,
+					byteLength_data      : file.size
+				});
+				
+				body = util.concatBuffers([header, file_state.file_preview, state.file_data])
+			}
+
 			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
 
 			const s3 = new S3({
@@ -1992,51 +2118,204 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const upload = s3.uploadPart({
 				Bucket     : 'cloud.storm4.test',
 				Key        : key,
-				PartNumber : part_index,
+				PartNumber : part_index+1, // <= not zero-based: [1, 10,000]
 				UploadId   : multipart_state.upload_id!,
-				Body       : state.file_data
+				Body       : body
 			});
-
+			
 			upload.on("httpUploadProgress", (progress)=> {
 
-				log.debug(`${METHOD_NAME}.onprogress: loaded(${progress.loaded}) total(${progress.total})`);
+				const upload_progress = (progress.loaded / progress.total);
+				this.setState((current)=>{
+					const next = _.cloneDeep(current) as ISendState;
+					next.upload_state!.files[upload_index].multipart_state!.progress[part_index] = upload_progress;
 
-				const upload_progress = Math.round(100 * (progress.loaded / progress.total));
-				this.setState({
-					upload_progress
+					return next;
 				});
 			});
-		/*
+		
 			upload.send((err, data)=> {
 
-				// Todo...
+				if (err)
+				{
+					log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: err: `+ err);
+
+					_fail();
+					return;
+				}
+
+				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: DONE !`);
+				const eTag = data.ETag;
+
+				if (eTag == null)
+				{
+					log.err("${METHOD_NAME}: s3.createMultipartUpload(): unable to extract upload_id !");
+
+					_fail();
+					return;
+				}
+
+				this.setState((current)=> {
+					const next = _.cloneDeep(current) as ISendState;
+
+					const _multipart_state = next.upload_state!.files[upload_index].multipart_state!;
+
+					_multipart_state.progress[part_index] = 1.0;
+					_multipart_state.eTags[part_index] = eTag;
+
+					return next;
+
+				}, ()=> {
+
+					this.uploadNext();
+				});
 			});
-		*/
 		}
 
 		const _fail = (upload_err_fatal?: string): void => {
 			log.debug(`${METHOD_NAME}._fail()`);
 
+			const upload_index = this.state.upload_index;
+			const multipart_state = this.state.upload_state!.files[upload_index].multipart_state!;
+
 			// Step-specific failure code
-			multipart_state.in_progress[part_index] = false;
+			multipart_state.progress[part_index] = undefined;
 
 			this.uploadFail(upload_err_fatal);
 		}
 
-		_readChunk();
+		{ // Scoping
+
+			const upload_index = this.state.upload_index;
+			const multipart_state = this.state.upload_state!.files[upload_index].multipart_state!;
+
+			multipart_state.progress[part_index] = 0;
+
+			_readChunk();
+		}
 	}
 
 	protected uploadFile_multipart_complete(
-		in_state: {
-			upload_state : UploadState,
-			upload_index : number
-		}
 	): void
 	{
 		const METHOD_NAME = "uploadFile_multipart_complete()";
 		log.debug(METHOD_NAME);
 
-		// Todo...
+		// We do NOT use the S3 API to complete the multipart upload.
+		// Because it sucks.
+		// 
+		// If you use S3, then the response might get lost.
+		// Which we are unable to recover from .
+		// 
+		// We use our own API to get around this problem.
+
+		const _generateJSON = (): void => {
+			const SUB_METHOD_NAME = "_generateRcrdData()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const upload_index = this.state.upload_index;
+			const upload_state = this.state.upload_state!;
+
+			const file = this.state.file_list[upload_index];
+
+			const file_state = upload_state.files[upload_index];
+			const multipart_state = file_state.multipart_state!;
+
+			const key = this.getStagingPathForFile({upload_state, file_state, file, ext: "data"});
+
+			const parts: string[] = [];
+			for (let i = 0; i < multipart_state.num_parts; i++)
+			{
+				let eTag = multipart_state.eTags[i];
+				parts.push(eTag || "");
+			}
+
+			const json: S4MultipartCompleteRequest = {
+				bucket       : 'cloud.storm4.test',
+				staging_path : key,
+				upload_id    : multipart_state.upload_id || "",
+				parts        : parts
+			};
+
+			const json_str = JSON.stringify(json, null, 0);
+
+			// Next step
+			_fetchCredentials({json_str});
+		}
+
+		const _fetchCredentials = (
+			state: {
+				json_str : string
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME} _fetchCredentials()`);
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					_fail();
+				}
+			});
+		}
+
+		const _performUpload = (
+			state: {
+				json_str    : string,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			const SUB_METHOD_NAME = "_performUpload()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const host = api_gateway.getHost();
+			const path = api_gateway.getPath("/multipartComplete");
+
+			const url = `https://${host}${path}`;
+
+			fetch(url, {
+				method : 'POST',
+				body   : state.json_str,
+				headers: {
+					"Content-Type": "application/json"
+				}
+	
+			}).then((response)=> {
+
+				if (response.status == 200) {
+					return response.json();
+				}
+				else {
+					throw new Error("Server returned status code: "+ response.status);
+				}
+
+			}).then((json)=> {
+
+				const response = json as S4MultipartCompleteResponse;
+				
+
+			}).catch((err)=> {
+
+				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: err: `+ err);
+
+				_fail();
+			});
+		}
+
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+			
+			this.uploadFail(upload_err_fatal);
+		}
+
+		_generateJSON();
 	}
 
 	protected uploadFiles_pollStatus(
@@ -2708,9 +2987,22 @@ class Send extends React.Component<ISendProps, ISendState> {
 							</li>
 						</ul>
 					</li>
+				</Typography>
+				<Typography paragraph={true}>
+					The smart contract associates a userID with a merkle tree root value.
+					A <a href="https://en.wikipedia.org/wiki/Merkle_tree" className={classes.a_noLinkColor}>merkle tree</a> is
+					a well known cryptographic data structure used to verify data sets.
+					The location of the full merkle tree is derived from the root.
+				</Typography>
+				<Typography component="ul" paragraph={true}>
 					<li className={classes.wrap}>
 						Merkle Tree File: <a href={merkle_tree_url} className={classes.a_noLinkColor}>link</a>
 					</li>
+				</Typography>
+				<Typography paragraph={true}>
+					The merkle tree file contains the public key information for 1 or more users.
+					By verifying the merkle tree file, we can verify that the user's public key
+					has not been tampered with.
 				</Typography>
 			</div>
 		);
@@ -2826,6 +3118,29 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			section_details = (
 				<div className={classes.section_expansionPanel_details}>
+					<Typography paragraph={true}>
+						Public key verification requires 5 steps:
+					</Typography>
+					<Typography component="ol" paragraph={true}>
+						<li>
+							Fetch the user's public key <span className={classes.gray}>(see above)</span>
+						</li>
+						<li>
+							Fetch the merkle tree root from the blockchain <span className={classes.gray}>(see above)</span>
+						</li>
+						<li>
+							Fetch the merkle tree file <span className={classes.gray}>(see above)</span>
+						</li>
+						<li>
+							Ensure the user's public key is listed properly in the merkle tree
+						</li>
+						<li>
+							Recalculate the merkle tree root, and ensure it matches the blockchain
+						</li>
+					</Typography>
+					<Typography paragraph={true}>
+						Information for steps 4 & 5:
+					</Typography>
 					<Typography component="ul" paragraph={true}>
 						<li className={classes.wrap}>
 							Public Key <span className={classes.gray}>(Base64)</span>: {pub_key.pubKey}
@@ -3148,8 +3463,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		if (is_uploading_data)
 		{
 			let percent = "0";
-			if (state.upload_progress) {
-				percent = state.upload_progress.toString();
+			if (file_state)
+			{
+				const file = this.state.file_list[upload_index];
+				const progress = this.getProgress({file, file_state});
+
+				percent = Math.floor(progress * 100).toString();
 			}
 			percent = _.padStart(percent, 3, '\u00A0');
 
@@ -3175,12 +3494,97 @@ class Send extends React.Component<ISendProps, ISendState> {
 			);
 		}
 
+		let info_multipart: React.ReactNode|null = null;
+		if (file_state && file_state.multipart_state)
+		{
+			const multipart_state = file_state.multipart_state;
+
+			if (multipart_state.upload_id == null)
+			{
+				info_multipart = (
+					<Typography
+						align="center"
+						variant="subheading"
+						className={classes.uploadInfo_text}
+					>
+						Initializing multipart upload...
+					</Typography>
+				);
+			}
+			else
+			{
+				const parts_flight: number[] = [];
+				const parts_complete: number[] = [];
+
+				for (let i = 0; i < multipart_state.num_parts; i++)
+				{
+					if (multipart_state.eTags[i] != null) {
+						parts_complete.push(i);
+					}
+					else if (multipart_state.progress[i] != null) {
+						parts_flight.push(i);
+					}
+				}
+
+				if (parts_flight.length == 0)
+				{
+					if (parts_complete.length == multipart_state.num_parts)
+					{
+						info_multipart = (
+							<Typography
+								align="center"
+								variant="subheading"
+								className={classes.uploadInfo_text}
+							>
+								{`Completing multipart upload...`}
+							</Typography>
+						);
+					}
+					else
+					{
+						info_multipart = (
+							<Typography
+								align="center"
+								variant="subheading"
+								className={classes.uploadInfo_text}
+							>&nbsp;</Typography>
+						);
+					}
+				}
+				else if (parts_flight.length == 1)
+				{
+					info_multipart = (
+						<Typography
+							align="center"
+							variant="subheading"
+							className={classes.uploadInfo_text}
+						>
+							{`Uploading part ${parts_flight[0]+1} of ${multipart_state.num_parts}...`}
+						</Typography>
+					);
+				}
+				else
+				{
+					info_multipart = (
+						<Typography
+							align="center"
+							variant="subheading"
+							className={classes.uploadInfo_text}
+						>
+							{`Uploading parts ${parts_flight[0]+1} & ${parts_flight[1]+1} of ${multipart_state.num_parts}...`}
+						</Typography>
+					);
+				}
+			}
+		}
+
 		return (
 			<div className={classes.section_uploadInfo}>
 				<div className={classes.uploadInfo_description_container}>
 					{info_step}
 					{info_what}
 					{info_file}
+					{info_multipart}
 				</div>
 			</div>
 		);
@@ -3241,7 +3645,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			// We're going to display the progress, even if the upload has failed.
 			// In the case of multipart, this makes sense as the upload is resumable.
 			// 
-			const progress = state.upload_progress || 0;
+			const file_state = state.upload_state!.files[idx];
+			const progress = this.getProgress({file, file_state}) * 100;
 
 			let section_status: React.ReactNode;
 			if (upload_failed) {

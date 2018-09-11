@@ -126,8 +126,10 @@ export interface S4Rcrd_Data_Message {
 	version      : 1,
 	type         : "ephemeral",
 	message     ?: string,
-	attachments  : Array<[string, string, string]> // see: S4Rcrd_Data_Attachment()
+	attachments  : S4Rcrd_Data_Attachment[]
 }
+
+export type S4Rcrd_Data_Attachment = [string, string, string];
 
 export function make_attachment(
 	options: {
@@ -135,7 +137,19 @@ export function make_attachment(
 		cloudFileID : string,
 		filename    : string
 	}
-): [string, string, string]
+): S4Rcrd_Data_Attachment
 {
 	return [options.cloudPath, options.cloudFileID, options.filename];
+}
+
+export interface S4MultipartCompleteRequest {
+	bucket       : string,
+	staging_path : string,
+	upload_id    : string,
+	parts        : string[]
+}
+
+export interface S4MultipartCompleteResponse {
+	status_code : number,
+	duplicate   : boolean
 }
