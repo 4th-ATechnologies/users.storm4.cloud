@@ -384,8 +384,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 interface UploadState_Multipart {
 	part_size     : number,
 	num_parts     : number,
-	upload_id     : string|null,
-	has_completed : boolean
+	upload_id     : string|null
 	current_part  : number,
 	progress: {
 		[index: number]: number|undefined
@@ -1628,7 +1627,15 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const encrypted_file_size = this.getEncryptedFileSize({file, file_state});
 			log.debug("encrypted_file_size: "+ encrypted_file_size)
 
-			if (encrypted_file_size >= (1024 * 1024 * 5)) // 5 MiB is absolute minimum
+			// What is the cutover point for switching to mulitpart ?
+			// 
+			// - 5 MiB is absolute MINIMUM (anything smaller not allowed by AWS)
+			// - We can detect if the user is on mobile...
+			// - But we don't know what the user's actual upload speed is
+			//
+			const MULTIPART_CUTOVER = (1024 * 1024 * 10);
+
+			if (encrypted_file_size >= MULTIPART_CUTOVER)
 			{
 				let part_size = (1024 * 1024 * 5);
 				let num_parts = Math.ceil(file.size / part_size);
@@ -1643,7 +1650,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 					part_size,
 					num_parts,
 					upload_id     : null,
-					has_completed : false,
 					current_part  : 0,
 					progress      : {},
 					eTags         : {}
@@ -1903,8 +1909,23 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				// We still have parts that need uploading.
 
-				const MAX_CONCURRENCY = this.isProbablyMobile() ? 1 : 2;
-				const SLOTS = MAX_CONCURRENCY - parts_flight.length;
+				let max_concurrency: number;
+				if (multipart_state.num_parts < 5)
+				{
+					// If there's a small number of parts,
+					// it may not make sense to upload multiple parts at the same time.
+					// 
+					// For example, consider the situation when there are exactly 2 parts.
+					// If we upload both parts at the same time, then we're defeating
+					// the primary reason of using multipart (resumeability).
+
+					max_concurrency = 1;
+				}
+				else {
+					max_concurrency = this.isProbablyMobile() ? 1 : 2;
+				}
+
+				const SLOTS = max_concurrency - parts_flight.length;
 
 				for (let i = 0; i < SLOTS && i < parts_available.length; i++)
 				{
@@ -2315,15 +2336,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(response, null, 2));
 				
-				if (response.status_code == 200)
-				{
-					log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: response.status_code: `+ response.status_code);
-				
-					_fail();
-				}
-				else
-				{
+				if (response.status_code == 200) {
 					_succeed();
+				}
+				else {
+					log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: response.status_code: `+ response.status_code);
+					_fail();
 				}
 
 			}).catch((err)=> {
@@ -2343,11 +2361,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			this.setState((current)=> {
 
 				const next = _.cloneDeep(current) as ISendState;
-				
-				const upload_index = next.upload_index;
-				const _multipart_state = next.upload_state!.files[upload_index].multipart_state!;
-
-				_multipart_state.has_completed = true;
+				next.upload_index++;
 				
 				return next;
 				
@@ -2377,7 +2391,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = "uploadFiles_pollStatus()";
 		log.debug(`${METHOD_NAME}`);
 
-		// Todo...
+		
 
 		this.setState((current)=> {
 
@@ -3695,8 +3709,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			// We're going to display the progress, even if the upload has failed.
 			// In the case of multipart, this makes sense as the upload is resumable.
 			// 
+			let progress = 0;
 			const file_state = state.upload_state!.files[idx];
-			const progress = this.getProgress({file, file_state}) * 100;
+			if (file_state) {
+				progress = this.getProgress({file, file_state}) * 100;
+			}
 
 			let section_status: React.ReactNode;
 			if (upload_failed) {
