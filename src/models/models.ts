@@ -159,7 +159,9 @@ export interface S4PollRequest {
 }
 
 export interface S4PollResponse {
-	
+	[request_id: string]: {
+		status: number,
+	}|undefined
 }
 
 

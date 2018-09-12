@@ -417,11 +417,13 @@ interface UploadState_Msg {
 }
 
 interface UploadState {
-	upload_id    : string,
-	burn_date    : number,
-	done_polling : boolean,
-	files        : UploadState_File[],
-	msg          : UploadState_Msg|null
+	upload_id          : string,
+	burn_date          : number,
+	done_polling_files : boolean,
+	done_polling_msg   : boolean,
+	polling_count      : number
+	files              : UploadState_File[],
+	msg                : UploadState_Msg|null
 }
 
 interface ISendProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
@@ -597,9 +599,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		return 0;
 	}
 
-	protected getCloudPath = (
+	protected getCloudPath(
 		file_state: UploadState_File
-	): string =>
+	): string
 	{
 		return `com.4th-a.storm4/temp/${file_state.random_filename}`;
 	}
@@ -1272,9 +1274,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			upload_state = {
 				upload_id,
 				burn_date,
-				done_polling : false,
-				files        : [],
-				msg          : null
+				done_polling_files : false,
+				done_polling_msg   : false,
+				polling_count      : 0,
+				files              : [],
+				msg                : null
 			};
 		}
 
@@ -1307,7 +1311,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				upload_state.files.push(file_state);
 			}
 		}
-		else if (upload_state.done_polling)
+		else if (upload_state.done_polling_files)
 		{
 			if (upload_state.msg == null)
 			{
@@ -1346,7 +1350,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					this.uploadFile();
 				}
 			}
-			else if (!upload_state.done_polling)
+			else if (!upload_state.done_polling_files)
 			{
 				this.uploadFiles_pollStatus({upload_state});
 			}
@@ -1402,20 +1406,30 @@ class Send extends React.Component<ISendProps, ISendState> {
 				//
 				json.metadata = metadata_cleartext;
 			}
-			{ // key
+			{ // keys
 	
-				const key_id = `UID:${this.props.user_id}`;
+				{ // UID:user_id
+
+					const key_id = `UID:${this.props.user_id}`;
 	
-				// 
-				// Todo: encrypt key
-				// Need: ECC 41417 support in JS
-				//
-				const key_cleartext_b64 = base64.fromByteArray(file_state.encryption_key);
-	
-				json.keys[key_id] = {
-					perms : "rws",
-					key   : key_cleartext_b64
-				};
+					// 
+					// Todo: encrypt key
+					// Need: ECC 41417 support in JS
+					//
+					const key_cleartext_b64 = base64.fromByteArray(file_state.encryption_key);
+		
+					json.keys[key_id] = {
+						perms : "rws",
+						key   : key_cleartext_b64
+					};
+				}
+				{ // UID:anonymous
+
+					json.keys["UID:anonymous"] = {
+						perms : "rW",
+						key   : ""
+					};
+				}
 			}
 
 			const rcrd_str = JSON.stringify(json, null, 0);
@@ -1432,10 +1446,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME} _fetchCredentials()`);
 
-			credentials_helper.getCredentials((err, credentials)=> {
+			credentials_helper.getCredentials((err, credentials, anonymous_id)=> {
 
-				if (credentials) {
-					_performUpload({...state, credentials});
+				if (credentials && anonymous_id) {
+					_performUpload({...state, credentials, anonymous_id});
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
@@ -1446,8 +1460,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performUpload = (
 			state: {
-				rcrd_str    : string,
-				credentials : AWSCredentials
+				rcrd_str     : string,
+				credentials  : AWSCredentials,
+				anonymous_id : string,
 			}
 		): void =>
 		{
@@ -1482,17 +1497,22 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}
 				else
 				{
-					_succeed();
+					_succeed(state);
 				}
 			});
 		}
 
 		const _succeed = (
+			state: {
+				rcrd_str     : string,
+				credentials  : AWSCredentials,
+				anonymous_id : string
+			}
 		): void =>
 		{
 			const SUB_METHOD_NAME = "_succeed()"
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
-/*
+
 			this.setState((current)=> {
 
 				const next = _.cloneDeep(current) as ISendState;
@@ -1500,6 +1520,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const upload_index = next.upload_index;
 				const _file_state = next.upload_state!.files[upload_index];
 
+				_file_state.anonymous_id_rcrd = state.anonymous_id;
 				_file_state.has_uploaded_rcrd = true;
 				
 				return next;
@@ -1508,7 +1529,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				this.uploadNext();
 			});
-*/
 		}
 
 		const _fail = (upload_err_fatal?: string): void => {
@@ -1745,10 +1765,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._fetchCredentials()`);
 
-			credentials_helper.getCredentials((err, credentials)=> {
+			credentials_helper.getCredentials((err, credentials, anonymous_id)=> {
 
-				if (credentials) {
-					_performUpload({...state, credentials});
+				if (credentials && anonymous_id) {
+					_performUpload({...state, credentials, anonymous_id});
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
@@ -1760,7 +1780,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _performUpload = (
 			state: {
 				file_data    : ArrayBuffer,
-				credentials  : AWSCredentials
+				credentials  : AWSCredentials,
+				anonymous_id : string,
 			}
 		): void =>
 		{
@@ -1821,16 +1842,26 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}
 				
 				// Next step
-				_succeed();
+				_succeed(state);
 			});
 		};
 
-		const _succeed = (): void => {
+		const _succeed = (
+			state: {
+				file_data    : ArrayBuffer,
+				credentials  : AWSCredentials,
+				anonymous_id : string
+			}
+		): void => {
 			log.err(`${METHOD_NAME}._succeed()`);
 			
 			this.setState((current)=> {
 				
 				const next = _.cloneDeep(current) as ISendState;
+
+				const _file_state = next.upload_state!.files[next.upload_index];
+				_file_state.anonymous_id_data = state.anonymous_id;
+
 				next.upload_index++;
 
 				return next;
@@ -2486,23 +2517,62 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(json, null, 2));
 
-				// TODO: Implement me
+				const response = json as S4PollResponse;
+
+				_succeed({...state, response});
 
 			}).catch((err)=> {
 
 				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: err: `+ err);
 
-				// TODO: Implement me
+				_fail();
 			});
 		}
 
-		const _succeed = (): void => {
+		const _succeed = (
+			state: {
+				json_str    : string,
+				credentials : AWSCredentials
+				response    : S4PollResponse
+			}
+		): void => {
 			log.err(`${METHOD_NAME}._succeed()`);
 			
 			this.setState((current)=> {
 				
 				const next = _.cloneDeep(current) as ISendState;
-				next.upload_state!.done_polling = true;
+
+				for (const file_status of next.upload_state!.files)
+				{
+					if (file_status.eTag_rcrd == null)
+					{
+						const poll_response = state.response[file_status.request_id_rcrd];
+						if (poll_response && poll_response.status == 200)
+						{
+							file_status.eTag_rcrd = "< how do we get eTag & cloudID ?>"
+						}
+					}
+					if (file_status.eTag_data == null)
+					{
+						const poll_response = state.response[file_status.request_id_data];
+						if (poll_response && poll_response.status == 200)
+						{
+							file_status.eTag_data = "< how do we get eTag & cloudID ?>"
+						}
+					}
+				}
+
+				let done_polling_files = true;
+				for (const file_status of next.upload_state!.files)
+				{
+					if ((file_status.eTag_rcrd == null) || (file_status.eTag_data == null))
+					{
+						done_polling_files = false;
+					}
+				}
+
+				next.upload_state!.polling_count++;
+				next.upload_state!.done_polling_files = done_polling_files;
 
 				return next;
 
@@ -2519,6 +2589,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			
 			this.uploadFail(upload_err_fatal);
 		}
+
+		_generateJSON();
 	}
 
 	protected uploadMessage(
@@ -3561,7 +3633,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			file_state = upload_state.files[upload_index];
 		}
 
-		const step_count = (state.file_list.length * 2) + 1;
+		const step_count = (state.file_list.length * 2) + 3;
 		let step_index = 1 + (state.upload_index * 2);
 		if (file_state && file_state.has_uploaded_rcrd) {
 			step_index++;
@@ -3579,18 +3651,29 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		let is_uploading_rcrd = false;
 		let is_uploading_data = false;
+		let is_polling_files = false;
 		let is_uploading_msg = false;
+		let is_polling_msg = false;
 
-		if (state.upload_index >= state.file_list.length) {
-			is_uploading_msg = true;
-		}
-		else
+		if (state.upload_index < state.file_list.length)
 		{
 			if (file_state && file_state.has_uploaded_rcrd) {
 				is_uploading_data = true;
 			}
 			else {
 				is_uploading_rcrd = true;
+			}
+		}
+		else if (upload_state)
+		{
+			if ( ! upload_state.done_polling_files) {
+				is_polling_files = true;
+			}
+			else if (upload_state.msg && ! upload_state.msg.has_uploaded_rcrd) {
+				is_uploading_msg = true;
+			}
+			else if ( ! upload_state.done_polling_msg) {
+				is_polling_msg = true;
 			}
 		}
 
@@ -3619,7 +3702,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</Typography>
 			);
 		}
-		else
+		else if (is_polling_files)
+		{
+			info_what = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text}
+				>
+					Verifying file uploads...
+				</Typography>
+			);
+		}
+		else if (is_uploading_msg)
 		{
 			info_what = (
 				<Typography
@@ -3629,6 +3724,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 				>
 					Uploading encrypted message...
 				</Typography>
+			);
+		}
+		else if (is_polling_msg)
+		{
+			info_what = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text}
+				>
+					Verifying message upload...
+				</Typography>
+			);
+		}
+		else // we're in some kind of bad state
+		{
+			info_what = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text}
+				>&nbsp;</Typography>
 			);
 		}
 

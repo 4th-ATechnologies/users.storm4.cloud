@@ -26,7 +26,11 @@ interface CredentialsResponse {
 
 let cached_credentials: CredentialsResponse|null = null;
 
-type GetCredentialsCallback = (err: Error|null, credentials ?: AWSCredentials) => void;
+type GetCredentialsCallback = (
+	err           : Error|null,
+	credentials  ?: AWSCredentials,
+	anonymous_id ?: string
+) => void;
 
 let pending_callbacks: GetCredentialsCallback[] = [];
 
@@ -46,15 +50,17 @@ export function getCredentials(
 			// We've still got at least 15 minutes to perform the next upload.
 			// So let's go ahead and use the cached credentials again.
 
-			const result = new AWSCredentials({
+			const credentials = new AWSCredentials({
 				accessKeyId     : cached_credentials.Credentials.AccessKeyId,
 				secretAccessKey : cached_credentials.Credentials.SecretAccessKey,
 				sessionToken    : cached_credentials.Credentials.SessionToken
 			});
-			result.expireTime = expire;
+			credentials.expireTime = expire;
+
+			const anonymous_id = getAnonymousID(cached_credentials);
 
 			setImmediate(()=> {
-				in_callback(null, result);
+				in_callback(null, credentials, anonymous_id);
 			});
 			return;
 		}
@@ -99,19 +105,21 @@ export function getCredentials(
 		{
 			cached_credentials = json;
 
-			const result = new AWSCredentials({
+			const credentials = new AWSCredentials({
 				accessKeyId     : cached_credentials.Credentials.AccessKeyId,
 				secretAccessKey : cached_credentials.Credentials.SecretAccessKey,
 				sessionToken    : cached_credentials.Credentials.SessionToken
 			});
-			result.expireTime = new Date(json.Credentials.Expiration);
+			credentials.expireTime = new Date(json.Credentials.Expiration);
+
+			const anonymous_id = getAnonymousID(cached_credentials);
 
 			const callbacks = pending_callbacks;
 			pending_callbacks = [];
 
 			for (const callback of callbacks)
 			{
-				callback(null, result);
+				callback(null, credentials, anonymous_id);
 			}
 		}
 		else
@@ -131,3 +139,20 @@ export function getCredentials(
 	});
 }
 
+function getAnonymousID(
+	response: CredentialsResponse
+): string
+{
+	// response: {
+	//   ...
+	//   "AssumedRoleUser":{
+	//     "AssumedRoleId":"AROAIVCPZZJWJ7W7MYYQC:1orfkoeo3wesqp3q",
+	//     "Arn":"arn:aws:sts::823589531544:assumed-role/anonymous-web/1orfkoeo3wesqp3q"
+	//   }
+	// }
+
+	const arn = response.AssumedRoleUser.Arn;
+	const components = arn.split('/');
+
+	return components[components.length - 1];
+}
