@@ -160,8 +160,19 @@ export interface S4PollRequest {
 
 export interface S4PollResponse {
 	[request_id: string]: {
-		status: number,
+		status    : number,
+		change_id ?: string,
+		info      ?: {
+			ts      : number,
+			app     : string,
+			region  : string,
+			bucket  : string,
+			command : string,
+			path    : string,
+			fileID  : string,
+			eTag    : string,
+			type    : "metadata"|"data",
+			id      : string,
+    }
 	}|undefined
 }
-
-

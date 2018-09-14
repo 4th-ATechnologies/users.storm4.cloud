@@ -698,6 +698,42 @@ class Send extends React.Component<ISendProps, ISendState> {
 		return progress;
 	}
 
+	protected getPollingBackoff(fail_count: number): number
+	{
+		// - A => failCount
+		// - B => new delay
+		// - D => total (in seconds)
+		//
+		//  A :   B  =>   C
+		// ----------------------
+		//  1 :  1.0 =>   1.0
+		//  2 :  1.0 =>   2.0
+		//  3 :  2.0 =>   4.0
+		//  4 :  2.0 =>   6.0
+		//  5 :  4.0 =>  10.0
+		//  6 :  4.0 =>  14.0
+		//  7 :  6.0 =>  20.0
+		//  8 :  6.0 =>  26.0
+		//  9 :  8.0 =>  34.0
+		// 10 :  8.0 =>  42.0
+		// 11 : 10.0 =>  52.0
+		// 12 : 10.0 =>  62.0
+		// 13 : 12.0 =>  74.0
+		// 14 : 12.0 =>  86.0
+		// 15 : 14.0 => 100.0
+		// 16 : 14.0 => 114.0
+	
+		if (fail_count ==  0) { return 1000 *  0.0; } // milliseconds
+		if (fail_count <=  2) { return 1000 *  1.0; }
+		if (fail_count <=  4) { return 1000 *  2.0; }
+		if (fail_count <=  6) { return 1000 *  4.0; }
+		if (fail_count <=  8) { return 1000 *  6.0; }
+		if (fail_count <= 10) { return 1000 *  8.0; }
+		if (fail_count <= 12) { return 1000 * 10.0; }
+		if (fail_count <= 14) { return 1000 * 12.0; }
+		else                  { return 1000 * 14.0; }
+	}
+
 	protected fetchUserProfile = ()=> {
 		log.debug("fetchUserProfile()");
 
@@ -2549,7 +2585,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 						const poll_response = state.response[file_status.request_id_rcrd];
 						if (poll_response && poll_response.status == 200)
 						{
-							file_status.eTag_rcrd = "< how do we get eTag & cloudID ?>"
+							if (poll_response.info)
+							{
+								file_status.eTag_rcrd = poll_response.info.eTag   || "unknown";
+								file_status.cloud_id  = poll_response.info.fileID || "unknown";
+							}
 						}
 					}
 					if (file_status.eTag_data == null)
@@ -2557,7 +2597,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 						const poll_response = state.response[file_status.request_id_data];
 						if (poll_response && poll_response.status == 200)
 						{
-							file_status.eTag_data = "< how do we get eTag & cloudID ?>"
+							if (poll_response.info)
+							{
+								file_status.eTag_data = poll_response.info.eTag || "unknown";
+							}
 						}
 					}
 				}
@@ -2578,7 +2621,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			}, ()=> {
 
-				this.uploadNext();
+				const upload_state = this.state.upload_state!;
+				if (upload_state.done_polling_files)
+				{
+					this.uploadNext();
+				}
+				else
+				{
+					const delay = this.getPollingBackoff(upload_state.polling_count);
+
+					setTimeout(()=> {
+						this.uploadNext();
+
+					}, delay);
+				}
 			});
 		}
 
