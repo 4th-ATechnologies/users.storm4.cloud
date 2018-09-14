@@ -38,6 +38,8 @@ export function getCredentials(
 	in_callback: GetCredentialsCallback
 ): void
 {
+	let prev_anonymous_id: string|null = null;
+
 	if (cached_credentials)
 	{
 		const nowPlusBuffer = Date.now() + (1000 * 60 * 15); // 15 minutes
@@ -67,6 +69,8 @@ export function getCredentials(
 		else
 		{
 			log.debug("Cache miss: expires too soon: "+ expire);
+
+			prev_anonymous_id = getAnonymousID(cached_credentials)
 		}
 	}
 
@@ -81,8 +85,10 @@ export function getCredentials(
 	const host = apiGateway.getHost();
 	const path = apiGateway.getPath("/delegation");
 
-	const url = `https://${host}${path}`;
-
+	const url = (prev_anonymous_id != null) ?
+		`https://${host}${path}?recycle=${prev_anonymous_id}` :
+		`https://${host}${path}`;
+	
 	fetch(url, {
 		method : "GET"
 

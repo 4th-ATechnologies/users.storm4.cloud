@@ -412,8 +412,9 @@ interface UploadState_File {
 interface UploadState_Msg {
 	encryption_key     : Uint8Array,
 	random_filename    : string,
-	request_id_rcrd    : string,
 	has_uploaded_rcrd  : boolean,
+	request_id         : string,
+	anonymous_id      ?: string
 }
 
 interface UploadState {
@@ -628,9 +629,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 	): string
 	{
 		const random_filename = options.msg_state.random_filename;
-		const request_id = options.msg_state.request_id_rcrd;
+		const request_id = options.msg_state.request_id;
 
-		return `staging/2/com.4th-a.storm4/put-if-nonexistent/temp/${random_filename}.rcrd/${request_id}`;
+		return `staging/2/com.4th-a.storm4/put-if-nonexistent/msgs/${random_filename}.rcrd/${request_id}`;
 	}
 
 	protected getEncryptedFileSize(
@@ -1356,12 +1357,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const encryption_key = util.randomEncryptionKey();
 				const random_filename = util.randomFileName();
 
-				const request_id_rcrd = util.randomHexString(16);
+				const request_id = util.randomHexString(16);
 
 				const msg_state: UploadState_Msg = {
 					encryption_key,
 					random_filename,
-					request_id_rcrd,
+					request_id,
 					has_uploaded_rcrd: false,
 				};
 
@@ -2343,10 +2344,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME} _fetchCredentials()`);
 
-			credentials_helper.getCredentials((err, credentials)=> {
+			credentials_helper.getCredentials((err, credentials, anonymous_id)=> {
 
-				if (credentials) {
-					_performUpload({...state, credentials});
+				if (credentials && anonymous_id) {
+					_performUpload({...state, credentials, anonymous_id});
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
@@ -2357,8 +2358,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performUpload = (
 			state: {
-				json_str    : string,
-				credentials : AWSCredentials
+				json_str     : string,
+				credentials  : AWSCredentials,
+				anonymous_id : string,
 			}
 		): void =>
 		{
@@ -2399,7 +2401,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(response, null, 2));
 				
 				if (response.status_code == 200) {
-					_succeed();
+					_succeed(state);
 				}
 				else {
 					log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: response.status_code: `+ response.status_code);
@@ -2415,6 +2417,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		const _succeed = (
+			state: {
+				json_str     : string,
+				credentials  : AWSCredentials,
+				anonymous_id : string,
+			}
 		): void =>
 		{
 			const SUB_METHOD_NAME = "_succeed()"
@@ -2423,8 +2430,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			this.setState((current)=> {
 
 				const next = _.cloneDeep(current) as ISendState;
+
+				const _file_state = next.upload_state!.files[next.upload_index];
+				_file_state.anonymous_id_data = state.anonymous_id;
+
 				next.upload_index++;
-				
+
 				return next;
 				
 			}, ()=> {
@@ -2571,7 +2582,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 				credentials : AWSCredentials
 				response    : S4PollResponse
 			}
-		): void => {
+		): void =>
+		{
 			log.err(`${METHOD_NAME}._succeed()`);
 			
 			this.setState((current)=> {
@@ -2711,7 +2723,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const key_cleartext_b64 = base64.fromByteArray(msg_state.encryption_key);
 	
 				json.keys[key_id] = {
-					perms : "rws",
+					perms : "rwsRL",
 					key   : key_cleartext_b64
 				};
 			}
@@ -2730,10 +2742,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._fetchCredentials()`);
 
-			credentials_helper.getCredentials((err, credentials)=> {
+			credentials_helper.getCredentials((err, credentials, anonymous_id)=> {
 
-				if (credentials) {
-					_performUpload({...state, credentials});
+				if (credentials && anonymous_id) {
+					_performUpload({...state, credentials, anonymous_id});
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
@@ -2744,8 +2756,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performUpload = (
 			state: {
-				rcrd_str    : string,
-				credentials : AWSCredentials
+				rcrd_str     : string,
+				credentials  : AWSCredentials,
+				anonymous_id : string
 			}
 		): void =>
 		{
@@ -2775,13 +2788,18 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}
 				else
 				{
-					_succeed();
+					_succeed(state);
 				}
 			});
 		}
 
 		const _succeed = (
-			): void =>
+			state: {
+				rcrd_str     : string,
+				credentials  : AWSCredentials,
+				anonymous_id : string
+			}
+		): void =>
 		{
 			log.err(`${METHOD_NAME}._succeed()`);
 
@@ -2790,15 +2808,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const next = _.cloneDeep(current) as ISendState;
 				if (next.upload_state && next.upload_state.msg)
 				{
+					next.upload_state.polling_count = 0;
+					next.upload_state.msg.anonymous_id = state.anonymous_id;
 					next.upload_state.msg.has_uploaded_rcrd = true;
 				}
-				next.upload_success = true;
 
 				return next;
 				
 			}, ()=> {
 
-				// Done !
+				this.uploadNext();
 			});
 		}
 
@@ -2818,11 +2837,157 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = "uploadMessage_pollStatus()";
 		log.debug(`${METHOD_NAME}`);
 
-		// Todo...
+		const _generateJSON = (): void => {
+			const SUB_METHOD_NAME = "_generateRcrdData()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-		this.setState({
-			upload_success: true
-		});
+			const upload_state = this.state.upload_state!;
+
+			const json: S4PollRequest = {
+				requests: []
+			};
+
+			const msg_state = upload_state.msg!;
+
+			const anonymous_id = msg_state.anonymous_id || "";
+			const request_id   = msg_state.request_id   || "";
+
+			json.requests.push([anonymous_id, request_id]);
+
+			const json_str = JSON.stringify(json, null, 0);
+
+			// Next step
+			_fetchCredentials({json_str});
+		}
+
+		const _fetchCredentials = (
+			state: {
+				json_str : string
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._fetchCredentials()`);
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					_fail();
+				}
+			});
+		}
+
+		const _performUpload = (
+			state: {
+				json_str    : string,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			const SUB_METHOD_NAME = "_performUpload()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const host = api_gateway.getHost();
+			const path = api_gateway.getPath("/poll-request");
+
+			const url = `https://${host}${path}`;
+
+			const options = aws4.sign({
+				host   : host,
+				path   : path,
+				method : 'POST',
+				body   : state.json_str,
+				headers : {
+					"Content-Type": "application/json"
+				}
+
+			}, state.credentials);
+
+			log.debug(`aws4.sign() => `+ JSON.stringify(options, null, 2));
+
+			fetch(url, options).then((response)=> {
+
+				if (response.status == 200) {
+					return response.json();
+				}
+				else {
+					throw new Error("Server returned status code: "+ response.status);
+				}
+
+			}).then((json)=> {
+
+				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(json, null, 2));
+
+				const response = json as S4PollResponse;
+
+				_succeed({...state, response});
+
+			}).catch((err)=> {
+
+				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: err: `+ err);
+
+				_fail();
+			});
+		}
+
+		const _succeed = (
+			state: {
+				json_str    : string,
+				credentials : AWSCredentials
+				response    : S4PollResponse
+			}
+		): void => {
+			log.err(`${METHOD_NAME}._succeed()`);
+
+			const {response} = state;
+			const msg_state = this.state.upload_state!.msg!;
+
+			let done_polling = false;
+
+			const response_msg = response[msg_state.request_id];
+			if (response_msg && response_msg.status == 200)
+			{
+				done_polling = true;
+			}
+
+			this.setState((current)=> {
+				const next = _.cloneDeep(current) as ISendState;
+				if (done_polling) {
+					next.upload_success = true;
+				}
+				else {
+					next.upload_state!.polling_count++;
+				}
+
+				return next;
+
+			}, ()=> {
+
+				if (!done_polling)
+				{
+					const upload_state = this.state.upload_state!;
+					const delay = this.getPollingBackoff(upload_state.polling_count);
+
+					setTimeout(()=> {
+						this.uploadNext();
+
+					}, delay);
+				}
+			});
+		}
+
+		const _fail = (upload_err_fatal?: string): void => {
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+			
+			this.uploadFail(upload_err_fatal);
+		}
+
+		_generateJSON();
 	}
 
 	protected uploadFail(
@@ -3689,10 +3854,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 			file_state = upload_state.files[upload_index];
 		}
 
+		const msg_state = upload_state ? upload_state.msg : null;
+
 		const step_count = (state.file_list.length * 2) + 3;
 		let step_index = 1 + (state.upload_index * 2);
-		if (file_state && file_state.has_uploaded_rcrd) {
-			step_index++;
+
+		if (file_state)
+		{
+			if (file_state.has_uploaded_rcrd) {
+				step_index++;
+			}
+		}
+		if (upload_state)
+		{
+			if (upload_state.done_polling_files) {
+				step_index++;
+			}
+		}
+		if (msg_state)
+		{
+			if (msg_state.has_uploaded_rcrd) {
+				step_index++;
+			}
 		}
 
 		const info_step = (
