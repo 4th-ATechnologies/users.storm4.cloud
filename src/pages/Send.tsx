@@ -3532,6 +3532,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const {classes} = this.props;
 
 		const user_id = this.props.user_id;
+		const user_profile = state.user_profile;
+
+		let displayName = user_id;
+		if (user_profile)
+		{
+			const identityIdx = this.getIdentityIdx();
+			const identity = user_profile.auth0.identities[identityIdx];
+
+			displayName = util.displayNameForIdentity(identity, user_profile.s4);
+		}
 
 		const pub_key = state.public_key;
 		const merkle_tree_root = state.merkle_tree_root;
@@ -3604,7 +3614,41 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		let section_details: React.ReactNode;
-		if (pub_key && merkle_tree_root && merkle_tree_file)
+		if (state.is_verifying_public_key || state.pubkey_tampering_detected)
+		{
+			section_details = (
+				<div className={classes.section_expansionPanel_details}>
+				</div>
+			);
+		}
+		else if (state.pubkey_verifcation_success == false)
+		{
+			section_details = (
+				<div className={classes.section_expansionPanel_details}>
+					<Typography paragraph={true}>
+						The user's public key hasn't been posted to the blockchain yet,
+						so we're unable to independently verify it.
+					</Typography>
+					<Typography paragraph={true}>
+						You can still send files securely.
+						The files you send will be encrypted (in your browser) using the
+						public key that was fetched from the Storm4 servers. So long as
+						Storm4's servers haven't been hacked, everything is fine.
+					</Typography>
+					<Typography paragraph={true}>
+						Of course, it would be better if the public key was on the blockchain.
+						And '{displayName}' can make that happen - just by becoming a Storm4 customer,
+						instead of a freeloader ;)
+					</Typography>
+					<Typography paragraph={true}>
+						<a href='https://accounts.storm4.cloud' className={classes.a_noLinkColor}>Become a Storm4 customer</a> by making a one-time
+						payment, or setting up automatic payments. We accept all major credit cards
+						and major cryptocurrencies.
+					</Typography>
+				</div>
+			);
+		}
+		else if (pub_key && merkle_tree_root && merkle_tree_file)
 		{
 			const keyID_verification =
 				`echo -n "${pub_key.pubKey}" | base64 --decode | openssl dgst -sha256 | cut -c -32 | xxd -r -p | base64`;
