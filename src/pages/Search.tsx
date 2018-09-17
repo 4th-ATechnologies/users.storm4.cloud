@@ -639,8 +639,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			return str.toLowerCase();
 		});
 
-		log.debug('queryComponents: '+ queryComponents);
-
 		const identities = searchResult.auth0.identities;
 		searchResult.auth0.matches = [];
 
@@ -764,6 +762,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 		const bestMatchIdx = sortedMatches[0].idx;
 		searchResult.auth0.displayIdx = bestMatchIdx;
+
+		log.debug('searchResult.auth0: '+ JSON.stringify(searchResult.auth0, null, 2));
 	}
 
 	protected initialsForDisplayName = (
@@ -1011,6 +1011,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 									<React.Fragment key={user_id}>
 									{match.boldRanges.map((range, rangeIdx) => {
 
+										let result: React.ReactNode;
+
 										const hasPrefix = range.indexStart > lastIndex;
 										const hasSuffix =
 										(range.indexEnd < displayName.length) &&
@@ -1022,7 +1024,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 											const b = displayName.substring(range.indexStart, range.indexEnd);
 											const c = displayName.substring(range.indexEnd);
 
-											return (
+											result = (
 												<React.Fragment key={`fragment_${rangeIdx}`}>
 													<span key={`a_${rangeIdx}`}>{a}</span>
 													<span key={`b_${rangeIdx}`} className={classes.spanBold}>{b}</span>
@@ -1035,10 +1037,10 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 											const a = displayName.substring(lastIndex, range.indexStart);
 											const b = displayName.substring(range.indexStart, range.indexEnd);
 
-											return (
+											result = (
 												<React.Fragment key={`fragment_${rangeIdx}`}>
-													<span key={`a_${rangeIdx}`}>{a}</span>
-													<span key={`b_${rangeIdx}`} className={classes.spanBold}>{b}</span>
+													<span key={`${rangeIdx}_a`}>{a}</span>
+													<span key={`${rangeIdx}_b`} className={classes.spanBold}>{b}</span>
 												</React.Fragment>
 											);
 										}
@@ -1047,10 +1049,10 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 											const b = displayName.substring(range.indexStart, range.indexEnd);
 											const c = displayName.substring(range.indexEnd);
 
-											return (
+											result = (
 												<React.Fragment key={`fragment_${rangeIdx}`}>
-													<span key={`b_${rangeIdx}`} className={classes.spanBold}>{b}</span>
-													<span key={`c_${rangeIdx}`}>{c}</span>
+													<span key={`${rangeIdx}_b`} className={classes.spanBold}>{b}</span>
+													<span key={`${rangeIdx}_c`}>{c}</span>
 												</React.Fragment>
 											);
 										}
@@ -1058,12 +1060,13 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 										{
 											const b = displayName.substring(range.indexStart, range.indexEnd);
 
-											return (
-												<span className={classes.spanBold}>{b}</span>
+											result = (
+												<span key={`${rangeIdx}_b`} className={classes.spanBold}>{b}</span>
 											);
 										}
 
 										lastIndex = range.indexEnd;
+										return result;
 									})}
 									</React.Fragment>
 								);
