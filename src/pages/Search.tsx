@@ -73,10 +73,6 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		margin: 0,
 		padding: 0
 	},
-	span_securely: {
-		textDecoration: 'underline',
-		textDecorationColor: 'rgba(193, 193,193,0.1)'
-	},
 	explanation_p: {
 		paddingTop: theme.spacing.unit,
 		lineHeight: 1.75
@@ -115,6 +111,11 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginBottom: 16,
 		marginLeft: theme.spacing.unit * 2,
 		visibility: 'hidden',
+	},
+	noSearchResults: {
+		textAlign: 'center',
+		paddingTop: theme.spacing.unit * 2,
+		lineHeight: 1.75
 	},
 	table: {
 		minWidth: 400,
@@ -304,6 +305,18 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		userIdentsMenuOpen          : null,
 		userIdentsMenuSourceIndex   : 0, // state.searchResults.results[here]
 		userIdentsMenuSelectedIndex : 0
+	};
+
+	private displayNameForProvider = (provider: string): string => {
+
+		for (const idp of this.state.identityProviders)
+		{
+			if (idp.id == provider) {
+				return idp.displayName;
+			}
+		}
+
+		return provider;
 	};
 
 	private fetchIdentityProviders = ()=> {
@@ -955,6 +968,47 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const searchResults = state.searchResults;
 		if (searchResults == null) {
 			return null;
+		}
+
+		if (searchResults.results.length == 0)
+		{
+			const is_searching = (state.searchQueryIndex > state.searchResultsIndex);
+			if (is_searching) {
+				return null;
+			}
+
+			let explanation: React.ReactNode;
+			if (searchResults.provider == '*')
+			{
+				explanation = (
+					<Typography
+						variant="subheading"
+						className={classes.noSearchResults}
+					>
+						No results found for query.
+					</Typography>
+				);
+			}
+			else
+			{
+				const providerDisplayName = this.displayNameForProvider(searchResults.provider);
+				explanation = (
+					<Typography
+						variant="subheading"
+						paragraph={true}
+						className={classes.noSearchResults}
+					>
+						No results found for query.<br/>
+						Your query is currently limited to '{providerDisplayName}'.
+					</Typography>
+				);
+			}
+
+			return (
+				<div className={classes.section_searchResults}>
+					{explanation}
+				</div>
+			);
 		}
 
 		const rowsPerPage = searchResults.limit;
