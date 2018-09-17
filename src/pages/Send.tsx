@@ -3386,18 +3386,27 @@ class Send extends React.Component<ISendProps, ISendState> {
 			`curl -X POST -H "Content-Type: application/json" -d '${rpc_data}' ${rpc_url}`;
 
 		let contract_response: string;
-		let merkle_tree_url: string;
-		if (merkle_tree_root == null) {
+		let merkle_tree_file_value: React.ReactNode;
+		if (merkle_tree_root == null)
+		{
 			contract_response = "fetching...";
-			merkle_tree_url   = "fetching...";
+			merkle_tree_file_value = (
+				<span>{contract_response}</span>
+			);
 		}
-		else if (merkle_tree_root.length == 0) {
+		else if (merkle_tree_root.length == 0)
+		{
 			contract_response = "not available (user not on blockchain yet)";
-			merkle_tree_url   = "not available (user not on blockchain yet)";
+			merkle_tree_file_value = (
+				<span>{contract_response}</span>
+			);
 		}
-		else {
+		else
+		{
 			contract_response = merkle_tree_root;
-			merkle_tree_url = util.merkleTreeFileURL(merkle_tree_root);
+			merkle_tree_file_value = (
+				<a href={util.merkleTreeFileURL(merkle_tree_root)} className={classes.a_noLinkColor}>link</a>
+			);
 		}
 
 		const section_details = (
@@ -3462,7 +3471,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</Typography>
 				<Typography component="ul" paragraph={true}>
 					<li className={classes.wrap}>
-						Merkle Tree File: <a href={merkle_tree_url} className={classes.a_noLinkColor}>link</a>
+						Merkle Tree File: {merkle_tree_file_value}
 					</li>
 				</Typography>
 				<Typography paragraph={true}>
@@ -3641,7 +3650,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 							</ul>
 						</li>
 						<li className={classes.wrap}>
-							Calculated With: <a href="https://github.com/devedge/merkle-tree-gen" className={classes.a_noLinkColor}>merkle-tree-gen</a>
+							Calculated with: <a href="https://github.com/devedge/merkle-tree-gen" className={classes.a_noLinkColor}>merkle-tree-gen</a>
 						</li>
 					</Typography>
 				</div>
