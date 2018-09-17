@@ -77,6 +77,12 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		paddingTop: theme.spacing.unit,
 		lineHeight: 1.75
 	},
+	explanation_productLink: {
+		color: 'inherit',
+		textDecoration: 'underline',
+		textDecorationColor: 'rgba(193,193,193,0.6)',
+	//	textDecorationColor: theme.palette.divider
+	},
 	section_searchFields: {
 		display: 'flex',
 		flexDirection: 'row',
@@ -1266,7 +1272,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						SEND FILES SECURELY
 					</Typography><br/>
 					<Typography variant="subheading" className={classes.explanation_p} >
-						Send files to any Storm4 user.<br/>
+						Send files to any <a href='https://www.storm4.cloud' className={classes.explanation_productLink}>Storm4</a> user.<br/>
 						Files are encrypted in your browser before uploading.<br/>
 						Only the recipient can decrypt & read the files you send.<br/>
 						Storm4 users have their public keys secured on the blockchain.<br/>

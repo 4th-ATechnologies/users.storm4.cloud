@@ -51,6 +51,7 @@ import Avatar from '@material-ui/core/Avatar';
 import Badge from '@material-ui/core/Badge';
 import Button from '@material-ui/core/Button';
 import CircularProgress from '@material-ui/core/CircularProgress';
+import Divider from '@material-ui/core/Divider';
 import ExpansionPanel from '@material-ui/core/ExpansionPanel';
 import ExpansionPanelSummary from '@material-ui/core/ExpansionPanelSummary';
 import ExpansionPanelDetails from '@material-ui/core/ExpansionPanelDetails';
@@ -377,6 +378,38 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	},
 	section_sendButton: {
 		marginTop: theme.spacing.unit * 3
+	},
+	divider: {
+		marginTop: theme.spacing.unit * 8,
+		padding: 0,
+		maxWidth: 600,
+		[theme.breakpoints.up('sm')]: {
+			minWidth: 600
+		},
+		[theme.breakpoints.only('xs')]: {
+			minWidth: '100%',
+			width: '100%',
+		}
+	},
+	section_footer: {
+		margin: 0,
+		padding: 0
+	},
+	footer_text: {
+		margin: 0,
+		paddingTop: theme.spacing.unit * 2,
+		paddingBottom: 0,
+		paddingLeft: theme.spacing.unit * 2,
+		paddingRight: theme.spacing.unit * 2,
+		textAlign: 'center',
+		fontFamily: '"Exo 2"',
+		color: 'rgba(255,255,255,0.8)',
+		lineHeight: 1.75
+	},
+	footer_productLink: {
+		color: 'inherit',
+		textDecoration: 'underline',
+		textDecorationColor: 'rgba(193,193,193,0.6)',
 	}
 });
 
@@ -4350,6 +4383,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 			</div>
 		);
 	}
+
+	public renderFooter(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		return (
+			<div className={classes.section_footer}>
+				<Typography className={classes.footer_text}>
+					Crypto Cloud Storage<br/>
+					<a href='https://www.storm4.cloud' className={classes.footer_productLink}>https://www.storm4.cloud</a>
+				</Typography>
+			</div>
+		);
+	}
 	
 	public render(): React.ReactNode {
 		const state = this.state;
@@ -4376,6 +4423,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const section_fileList        = this.renderFileList();
 			const section_comment         = this.renderComment();
 			const section_button          = this.renderSendButton();
+			const section_footer          = this.renderFooter();
 
 			return (
 				<div className={classes.root}>
@@ -4389,6 +4437,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 					{section_fileList}
 					{section_comment}
 					{section_button}
+					<Divider className={classes.divider}/>
+					{section_footer}
 				</div>
 			);
 		}
