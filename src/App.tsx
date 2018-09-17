@@ -82,6 +82,10 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		paddingLeft: 4,
 		color: '#303030',
 		textShadow: '0px 0px 10px rgba(215,215,215,1.0)' // x offset, y offset, blur radius, color
+	},
+	a_hideLink: {
+		color: 'inherit',
+		textDecoration: 'none'
 	}
 });
 
@@ -104,7 +108,9 @@ class App extends React.Component<IAppProps, IAppState> {
 						<a href="/search">
 							<img src={imgLogo} className={classes.logoImage}/>
 						</a>
-						<Typography variant="display3" color="inherit" className={classes.logoTitle}>Storm4</Typography>
+						<Typography variant="display3" color="inherit" className={classes.logoTitle}>
+							<a href="/search" className={classes.a_hideLink}>Storm4</a>
+						</Typography>
 					</div>
 				</div>
 				<div className={classes.center}>
