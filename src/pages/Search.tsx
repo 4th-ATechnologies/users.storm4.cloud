@@ -67,7 +67,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		paddingLeft: 0,
 		paddingRight: 0,
 		paddingTop: theme.spacing.unit * 2,
-		paddingBottom: theme.spacing.unit * 5,
+		paddingBottom: 0,
 	},
 	explanation_title: {
 		margin: 0,
@@ -84,6 +84,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	//	textDecorationColor: theme.palette.divider
 	},
 	section_searchFields: {
+		marginTop: theme.spacing.unit * 2,
 		display: 'flex',
 		flexDirection: 'row',
 		flexWrap: 'nowrap',
@@ -214,6 +215,50 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		wordWrap: 'break-word',
 		wordBreak: 'break-all',
 		overflowWrap: 'break-word'
+	},
+	divider_yesResults: {
+		marginTop: theme.spacing.unit * 2,
+		padding: 0,
+		maxWidth: 600,
+		[theme.breakpoints.up('sm')]: {
+			minWidth: 600
+		},
+		[theme.breakpoints.only('xs')]: {
+			minWidth: '100%',
+			width: '100%',
+		}
+	},
+	divider_noResults: {
+		marginTop: theme.spacing.unit * 10,
+		padding: 0,
+		maxWidth: 600,
+		[theme.breakpoints.up('sm')]: {
+			minWidth: 600
+		},
+		[theme.breakpoints.only('xs')]: {
+			minWidth: '100%',
+			width: '100%',
+		}
+	},
+	section_footer: {
+		marginTop: theme.spacing.unit * 2,
+		padding: 0
+	},
+	footer_text: {
+		margin: 0,
+		paddingTop: 0,
+		paddingBottom: 0,
+		paddingLeft: theme.spacing.unit * 2,
+		paddingRight: theme.spacing.unit * 2,
+		textAlign: 'center',
+		fontFamily: '"Exo 2"',
+		color: 'rgba(255,255,255,0.8)',
+		lineHeight: 1.75
+	},
+	footer_productLink: {
+		color: 'inherit',
+		textDecoration: 'underline',
+		textDecorationColor: 'rgba(193,193,193,0.6)',
 	}
 });
 
@@ -485,14 +530,19 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const diff = now - this.lastSearchTextFieldClick;
 		const clearButtonClickDetected = (diff < 20);
 
-		this.setState({
-			searchTextFieldStr: newValue
-		}, ()=> {
-
-			if (clearButtonClickDetected) {
-				this.submitSearch();
-			}
-		});
+		if (false && clearButtonClickDetected)
+		{
+			this.setState({
+				searchTextFieldStr: newValue,
+				searchResults: null
+			});
+		}
+		else
+		{
+			this.setState({
+				searchTextFieldStr: newValue
+			});	
+		}
 	}
 
 	protected searchTextFieldKeyPress = (
@@ -1258,12 +1308,26 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		);
 	}
 
+	public renderFooter(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		return (
+			<div className={classes.section_footer}>
+				<Typography className={classes.footer_text}>
+					Crypto Cloud Storage<br/>
+					<a href='https://www.storm4.cloud' className={classes.footer_productLink}>https://www.storm4.cloud</a>
+				</Typography>
+			</div>
+		);
+	}
+
 	public render(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
 
-		const searchFieldsSection = this.renderSearchFields();
-		const searchResultsTableSection = this.renderSearchResultsTable();
+		const section_search = this.renderSearchFields();
+		const section_table  = this.renderSearchResultsTable();
 
 		return (
 			<div className={classes.root}>
@@ -1278,9 +1342,8 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						Storm4 users have their public keys secured on the blockchain.<br/>
 					</Typography>
 				</div>
-				<Divider/>
-				{searchFieldsSection}
-				{searchResultsTableSection}
+				{section_search}
+				{section_table}
 			</div>
 		);
 	}
