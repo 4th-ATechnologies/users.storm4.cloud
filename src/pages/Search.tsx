@@ -51,6 +51,7 @@ import Tooltip from '@material-ui/core/Tooltip';
 import Typography from '@material-ui/core/Typography';
 
 import AccountCircleIcon from '@material-ui/icons/AccountCircle';
+import MoreVertIcon from '@material-ui/icons/MoreVert';
 import SendIcon from '@material-ui/icons/Send';
 
 const log = Logger.Make('debug', 'Search');
@@ -59,8 +60,6 @@ const AVATAR_SIZE = 64;
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
-		margin: 0,
-		padding: 0
 	},
 	section_explanation: {
 		textAlign: 'center',
@@ -74,9 +73,20 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		margin: 0,
 		padding: 0
 	},
+	span_securely: {
+		textDecoration: 'underline',
+		textDecorationColor: 'rgba(193, 193,193,0.1)'
+	},
+	explanation_p: {
+		paddingTop: theme.spacing.unit,
+		lineHeight: 1.75
+	},
 	section_searchFields: {
-		marginLeft: theme.spacing.unit,
-	//	marginRight: theme.spacing.unit
+		display: 'flex',
+		flexDirection: 'row',
+		flexWrap: 'nowrap',
+		justifyContent: 'center',
+		alignItems: 'flex-end'
 	},
 	section_searchResults: {
 	//	marginLeft: theme.spacing.unit,
@@ -84,12 +94,27 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	},
 	searchTextField: {
 		width: 175,
+		marginLeft: 32, // offset to center context, exclusive of circular progress
 		marginRight: 12
+	},
+	searchProvidersButton: {
+		minWidth: 48,
+		maxWidth: 48,
+		minHeight: 48,
+		maxHeight: 48,
+		padding: 0,
+		borderRadius: '50%'
 	},
 	progress: {
 		marginTop: 0,
-		marginBottom: 0,
+		marginBottom: 16,
 		marginLeft: theme.spacing.unit * 2,
+	},
+	progressHidden: {
+		marginTop: 0,
+		marginBottom: 16,
+		marginLeft: theme.spacing.unit * 2,
+		visibility: 'hidden',
 	},
 	table: {
 		minWidth: 400,
@@ -834,22 +859,31 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const state = this.state;
 		const {classes} = this.props;
 
-		let providerName: string;
+		let providerIcon: React.ReactNode;
 		if (state.idpMenuSelectedIndex >= 0)
 		{
 			const idp = state.identityProviders[state.idpMenuSelectedIndex];
-			providerName = idp.displayName;
+			providerIcon = (
+				<img src={util.imageUrlForIdentityProvider_64(idp)} width="32" height="32" />
+			);
 		}
 		else
 		{
-			providerName = "All Providers"
+			providerIcon = (
+				<MoreVertIcon/>
+			);
 		}
 
-		let progressSection;
+		let progressSection: React.ReactNode;
 		if (state.searchQueryIndex > state.searchResultsIndex)
 		{
 			progressSection = (
 				<CircularProgress className={classes.progress} color="secondary" size={16} />
+			);
+		}
+		else {
+			progressSection = (
+				<CircularProgress className={classes.progressHidden} color="secondary" size={16} />
 			);
 		}
 
@@ -866,8 +900,11 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 					onClick={this.searchTextFieldClick}
 					
 				/>
-				<Button variant="outlined" onClick={this.idpMenuButtonClicked}>
-					{providerName}
+				<Button
+					className={classes.searchProvidersButton}
+					onClick={this.idpMenuButtonClicked}
+					>
+					{providerIcon}
 				</Button>
 				<Menu
 					id="lock-menu"
@@ -885,7 +922,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						selected={state.idpMenuSelectedIndex < 0}
 						onClick={this.idpMenuItemSelected.bind(this, -1)}
 					>
-						All Providers
+						Search All Providers
 					</MenuItem>
 					{state.identityProviders.map((idp, index) => {
 						return (
@@ -958,10 +995,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 										height={AVATAR_SIZE}
 									/>
 								</Avatar>
-								
 							);
 							
-							let displayNameSection;
+							let displayNameSection: React.ReactNode;
 							if (match.boldRanges.length == 0)
 							{
 								displayNameSection = (
@@ -1033,6 +1069,22 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 								);
 							}
 
+							let badgeOrNoBadge: React.ReactNode;
+							if (identities.length > 1)
+							{
+								badgeOrNoBadge = (
+									<Badge badgeContent={identities.length} color="primary">
+										<AccountCircleIcon />
+									</Badge>
+								);	
+							}
+							else
+							{
+								badgeOrNoBadge = (
+									<AccountCircleIcon />
+								);
+							}
+
 							const onClick = this.searchResultsTable_selectUser.bind(this, user_id);
 
 							const onClickOptions: UserIdentsMenuButtonClickedOptions = {
@@ -1059,9 +1111,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 										<div className={classes.tableRow_containerButtons}>
 											<Tooltip title="Show all identities linked to user's account.">
 												<IconButton onClick={onClickIdentities}>
-													<Badge badgeContent={identities.length} color="primary">
-														<AccountCircleIcon />
-													</Badge>
+													{badgeOrNoBadge}
 												</IconButton>
 											</Tooltip>
 											<Tooltip title="Send file(s) to user.">
@@ -1149,17 +1199,6 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		const state = this.state;
 		const {classes} = this.props;
 
-		let providerName: string;
-		if (state.idpMenuSelectedIndex >= 0)
-		{
-			const idp = state.identityProviders[state.idpMenuSelectedIndex];
-			providerName = idp.displayName;
-		}
-		else
-		{
-			providerName = "All Providers"
-		}
-
 		const searchFieldsSection = this.renderSearchFields();
 		const searchResultsTableSection = this.renderSearchResultsTable();
 
@@ -1167,11 +1206,12 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			<div className={classes.root}>
 				<div className={classes.section_explanation}>
 					<Typography variant="display2" className={classes.explanation_title} >
-						Send Files Securely
+						SEND FILES SECURELY
 					</Typography><br/>
-					<Typography variant="subheading">
+					<Typography variant="subheading" className={classes.explanation_p} >
 						Send files to any Storm4 user.<br/>
 						Files are encrypted in your browser before uploading.<br/>
+						Only the recipient can decrypt & read the files you send.<br/>
 						Storm4 users have their public keys secured on the blockchain.<br/>
 					</Typography>
 				</div>

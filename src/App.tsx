@@ -2,7 +2,7 @@ import * as React from 'react';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
 
-import imgLogo58 from './images/logo58.png';
+import imgLogo from './images/logoGray.png';
 import imgHeaderBackground from './images/background2.jpg'
 
 import MainPage from './pages/MainPage'
@@ -72,14 +72,16 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	toolbar: theme.mixins.toolbar,
 	logoImage: {
 		margin: 0,
-		padding: 0,
+		padding: '18px 0 0 0', // top left bottom right
+		'-webkit-filter': 'drop-shadow(0px 0px 10px rgba(215,215,215,1.0))',
+		'filter'        : 'drop-shadow(0px 0px 10px rgba(215,215,215,1.0))'
 	},
 	logoTitle: {
 		fontFamily: '"Exo 2"',
-		margin: theme.spacing.unit,
-		paddingLeft: theme.spacing.unit,
+		margin: 8,
+		paddingLeft: 4,
 		color: '#303030',
-		textShadow: '#C1C1C1 0px 0px 10px'
+		textShadow: '0px 0px 10px rgba(215,215,215,1.0)' // x offset, y offset, blur radius, color
 	}
 });
 
@@ -100,7 +102,7 @@ class App extends React.Component<IAppProps, IAppState> {
 				<div className={classes.header}>
 					<div className={classes.headerContent}>
 						<a href="/search">
-							<img src={imgLogo58} className={classes.logoImage}/>
+							<img src={imgLogo} className={classes.logoImage}/>
 						</a>
 						<Typography variant="display3" color="inherit" className={classes.logoTitle}>Storm4</Typography>
 					</div>
