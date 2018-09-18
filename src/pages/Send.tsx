@@ -80,8 +80,11 @@ import ReportProblemIcon from '@material-ui/icons/ReportProblem';
 
 const log = Logger.Make('debug', 'Send');
 
-const AVATAR_SIZE = 96;
-const COMMENT_MAX_LENGTH = 200;
+const AVATAR_SIZE = 96; // width & height (in pixels)
+const COMMENT_MAX_LENGTH = 200; // this isn't a messaging app
+
+const POLLING_MODULUS = 17;
+const POLLING_GIVE_UP = 50;
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
@@ -1457,20 +1460,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				// We either need to poll or touch (or give up)
 
-				const modulus = 17;
 				const polling_count = upload_state.polling_count;
 
-				if (polling_count >= (modulus * 3))
+				if (polling_count >= POLLING_GIVE_UP)
 				{
 					this.uploadFail("Server isn't responding");
 				}
-				else if ((polling_count == 0) || (polling_count % modulus != 0))
+				else if ((polling_count == 0) || (polling_count % POLLING_MODULUS != 0))
 				{
 					this.uploadPoll();
 				}
 				else
 				{
-					const expected_touch_count = Math.floor(polling_count / modulus);
+					const expected_touch_count = Math.floor(polling_count / POLLING_MODULUS);
 
 					if (upload_state.touch_count < expected_touch_count) {
 						this.uploadTouch();
@@ -4196,7 +4198,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		let info_file: React.ReactNode;
-		if (is_uploading_data)
+		if (is_polling_files || is_polling_msg)
+		{
+			let details_str: string;
+			if (upload_state && upload_state.polling_count >= 4)
+			{
+				details_str = `Attempt ${upload_state.polling_count + 1} of ${POLLING_GIVE_UP}`;
+			}
+			else
+			{
+				details_str = ' ';
+			}
+
+			info_file = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text_separate}
+				>{details_str}
+				</Typography>
+			);
+		}
+		else if (is_uploading_data)
 		{
 			let percent = "0";
 			if (file_state)
