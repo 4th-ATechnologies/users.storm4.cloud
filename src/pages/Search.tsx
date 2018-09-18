@@ -611,7 +611,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			return;
 		}
 
-		const host = api_gateway.getHost();
+		const host = api_gateway.getHost('us-west-2');
 		const path = api_gateway.getPath("/auth0/search");
 
 		const body = {

@@ -43,7 +43,7 @@ export function userID2Hex(user_id: string): string
 
 export function profileUrlForUser(user_id: string): string
 {
-	const host = api_gateway.getHost();
+	const host = api_gateway.getHost('us-west-2');
 	const path = api_gateway.getPath(`/users/info/${user_id}`);
 
 	return `https://${host}${path}?identities=1`;

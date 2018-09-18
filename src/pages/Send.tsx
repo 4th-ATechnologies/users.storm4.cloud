@@ -13,7 +13,7 @@ import ReactImageFallback from 'react-image-fallback';
 import {Credentials as AWSCredentials} from 'aws-sdk';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
-import {encode as utf8_encode} from 'utf8';
+//import {encode as utf8_encode} from 'utf8';
 
 import * as api_gateway from '../util/APIGateway';
 import * as credentials_helper from '../util/Credentials';
@@ -451,11 +451,10 @@ interface UploadState_Msg {
 }
 
 interface UploadState {
-	upload_id          : string,
 	burn_date          : number,
 	done_polling_files : boolean,
-	done_polling_msg   : boolean,
-	polling_count      : number
+	polling_count      : number,
+	touch_count        : number,
 	files              : UploadState_File[],
 	msg                : UploadState_Msg|null
 }
@@ -643,28 +642,42 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected getStagingPathForFile(
 		options: {
 			file_state : UploadState_File,
-			ext        : "rcrd"|"data"
+			ext        : "rcrd"|"data",
+			touch     ?: boolean
 		}
 	): string
 	{
-		const {file_state, ext} = options;
+		const {file_state, ext, touch} = options;
 
-		const random_filename = file_state.random_filename;
+		let command = "put-if-nonexistent";
+		if (touch == true) {
+			command = 'touch:'+ command;
+		}
+
+		const filename = file_state.random_filename;
 		const request_id = (ext == "rcrd") ? file_state.request_id_rcrd : file_state.request_id_data;
 
-		return `staging/2/com.4th-a.storm4/put-if-nonexistent/temp/${random_filename}.${ext}/${request_id}`;
+		return `staging/2/com.4th-a.storm4/${command}/temp/${filename}.${ext}/${request_id}`;
 	}
 
 	protected getStagingPathForMsg(
 		options: {
-			msg_state: UploadState_Msg
+			msg_state  : UploadState_Msg,
+			touch     ?: boolean
 		}
 	): string
 	{
-		const random_filename = options.msg_state.random_filename;
-		const request_id = options.msg_state.request_id;
+		const {msg_state, touch} = options;
 
-		return `staging/2/com.4th-a.storm4/put-if-nonexistent/msgs/${random_filename}.rcrd/${request_id}`;
+		let command = "put-if-nonexistent";
+		if (touch == true) {
+			command = 'touch:'+ command;
+		}
+
+		const filename = msg_state.random_filename;
+		const request_id = msg_state.request_id;
+
+		return `staging/2/com.4th-a.storm4/${command}/msgs/${filename}.rcrd/${request_id}`;
 	}
 
 	protected getEncryptedFileSize(
@@ -1338,15 +1351,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 		else
 		{
-			const upload_id = util.randomZBase32String(4);
 			const burn_date = Date.now() + (1000 * 60 * 60 * 24 * 30);
 
 			upload_state = {
-				upload_id,
 				burn_date,
 				done_polling_files : false,
-				done_polling_msg   : false,
 				polling_count      : 0,
+				touch_count        : 0,
 				files              : [],
 				msg                : null
 			};
@@ -1409,6 +1420,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		}, ()=> {
 
+			let needs_poll = false;
+
 			if (upload_index < file_list.length)
 			{
 				const file_state = upload_state.files[upload_index];
@@ -1422,7 +1435,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 			else if (!upload_state.done_polling_files)
 			{
-				this.uploadFiles_pollStatus({upload_state});
+				needs_poll = true;
 			}
 			else
 			{
@@ -1431,11 +1444,40 @@ class Send extends React.Component<ISendProps, ISendState> {
 				if ( ! msg_state.has_uploaded_rcrd) {
 					this.uploadMessage({upload_state, msg_state});
 				}
-				else if ( ! state.upload_success) {
-					this.uploadMessage_pollStatus();
+				else if ( ! state.upload_success)
+				{
+					needs_poll = true;
 				}
 				else {
 					// Upload complete
+				}
+			}
+
+			if (needs_poll)
+			{
+				// We either need to poll or touch (or give up)
+
+				const modulus = 17;
+				const polling_count = upload_state.polling_count;
+
+				if (polling_count >= (modulus * 3))
+				{
+					this.uploadFail("Server isn't responding");
+				}
+				else if ((polling_count == 0) || (polling_count % modulus != 0))
+				{
+					this.uploadPoll();
+				}
+				else
+				{
+					const expected_touch_count = Math.floor(polling_count / modulus);
+
+					if (upload_state.touch_count < expected_touch_count) {
+						this.uploadTouch();
+					}
+					else {
+						this.uploadPoll();
+					}
 				}
 			}
 		});
@@ -1549,7 +1591,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const s3 = new S3({
 				credentials : state.credentials,
-				region      : 'us-west-2'
+				region      : user_profile.s4.region
 			});
 
 			const upload = s3.upload({
@@ -1881,7 +1923,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			
 			const s3 = new S3({
 				credentials : state.credentials,
-				region      : 'us-west-2'
+				region      : user_profile.s4.region
 			});
 
 			const upload = s3.putObject({
@@ -1923,7 +1965,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				anonymous_id : string
 			}
 		): void => {
-			log.err(`${METHOD_NAME}._succeed()`);
+			log.debug(`${METHOD_NAME}._succeed()`);
 			
 			this.setState((current)=> {
 				
@@ -1943,7 +1985,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		const _fail = (upload_err_fatal?: string): void => {
-			log.debug(`${METHOD_NAME}._fail()`);
+			log.err(`${METHOD_NAME}._fail()`);
 
 			// Reserved for step-specific failure code
 			
@@ -2074,7 +2116,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const s3 = new S3({
 				credentials : state.credentials,
-				region      : 'us-west-2'
+				region      : user_profile.s4.region
 			});
 
 			s3.createMultipartUpload({
@@ -2236,7 +2278,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const s3 = new S3({
 				credentials : state.credentials,
-				region      : 'us-west-2'
+				region      : user_profile.s4.region
 			});
 
 			const upload = s3.uploadPart({
@@ -2400,7 +2442,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const host = api_gateway.getHost();
+			const user_profile = this.state.user_profile!;
+
+			const host = api_gateway.getHost(user_profile.s4.region);
 			const path = api_gateway.getPath("/multipartComplete");
 
 			const url = `https://${host}${path}`;
@@ -2474,212 +2518,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}, ()=> {
 
 				this.uploadNext();
-			});
-		}
-
-		const _fail = (upload_err_fatal?: string): void => {
-			log.debug(`${METHOD_NAME}._fail()`);
-
-			// Reserved for step-specific failure code
-			
-			this.uploadFail(upload_err_fatal);
-		}
-
-		_generateJSON();
-	}
-
-	protected uploadFiles_pollStatus(
-		in_state: {
-			upload_state : UploadState
-		}
-	): void
-	{
-		const METHOD_NAME = "uploadFiles_pollStatus()";
-		log.debug(`${METHOD_NAME}`);
-
-		const _generateJSON = (): void => {
-			const SUB_METHOD_NAME = "_generateRcrdData()";
-			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
-
-			const upload_state = this.state.upload_state!;
-
-			const json: S4PollRequest = {
-				requests: []
-			};
-
-			for (const file_state of upload_state.files)
-			{
-				if (file_state.eTag_rcrd == null)
-				{
-					const anonymous_id = file_state.anonymous_id_rcrd || "";
-					const request_id   = file_state.request_id_rcrd   || "";
-
-					json.requests.push([anonymous_id, request_id])
-				}
-				if (file_state.eTag_data == null)
-				{
-					const anonymous_id = file_state.anonymous_id_data || "";
-					const request_id   = file_state.request_id_data   || "";
-
-					json.requests.push([anonymous_id, request_id])
-				}
-			}
-
-			const max_requests = 50;
-			if (json.requests.length > max_requests) {
-				json.requests = json.requests.slice(0, max_requests);
-			}
-
-			const json_str = JSON.stringify(json, null, 2)
-
-			// Next step
-			_fetchCredentials({json_str});
-		}
-
-		const _fetchCredentials = (
-			state: {
-				json_str : string
-			}
-		): void =>
-		{
-			log.debug(`${METHOD_NAME}._fetchCredentials()`);
-
-			credentials_helper.getCredentials((err, credentials)=> {
-
-				if (credentials) {
-					_performUpload({...state, credentials});
-				}
-				else {
-					log.err("Error fetching anonymous AWS credentials: "+ err);
-					_fail();
-				}
-			});
-		}
-
-		const _performUpload = (
-			state: {
-				json_str    : string,
-				credentials : AWSCredentials
-			}
-		): void =>
-		{
-			const SUB_METHOD_NAME = "_performUpload()";
-			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
-
-			const host = api_gateway.getHost();
-			const path = api_gateway.getPath("/poll-request");
-
-			const url = `https://${host}${path}`;
-
-			const options = aws4.sign({
-				host   : host,
-				path   : path,
-				method : 'POST',
-				body   : state.json_str,
-				headers : {
-					"Content-Type": "application/json"
-				}
-
-			}, state.credentials);
-
-			log.debug(`aws4.sign() => `+ JSON.stringify(options, null, 2));
-
-			fetch(url, options).then((response)=> {
-
-				if (response.status == 200) {
-					return response.json();
-				}
-				else {
-					throw new Error("Server returned status code: "+ response.status);
-				}
-
-			}).then((json)=> {
-
-				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(json, null, 2));
-
-				const response = json as S4PollResponse;
-
-				_succeed({...state, response});
-
-			}).catch((err)=> {
-
-				log.err(`${METHOD_NAME}.${SUB_METHOD_NAME}: err: `+ err);
-
-				_fail();
-			});
-		}
-
-		const _succeed = (
-			state: {
-				json_str    : string,
-				credentials : AWSCredentials
-				response    : S4PollResponse
-			}
-		): void =>
-		{
-			log.err(`${METHOD_NAME}._succeed()`);
-			
-			this.setState((current)=> {
-				
-				const next = _.cloneDeep(current) as ISendState;
-
-				for (const file_status of next.upload_state!.files)
-				{
-					if (file_status.eTag_rcrd == null)
-					{
-						const poll_response = state.response[file_status.request_id_rcrd];
-						if (poll_response && poll_response.status == 200)
-						{
-							if (poll_response.info)
-							{
-								file_status.eTag_rcrd = poll_response.info.eTag   || "unknown";
-								file_status.cloud_id  = poll_response.info.fileID || "unknown";
-							}
-						}
-					}
-					if (file_status.eTag_data == null)
-					{
-						const poll_response = state.response[file_status.request_id_data];
-						if (poll_response && poll_response.status == 200)
-						{
-							if (poll_response.info)
-							{
-								file_status.eTag_data = poll_response.info.eTag || "unknown";
-							}
-						}
-					}
-				}
-
-				let done_polling_files = true;
-				for (const file_status of next.upload_state!.files)
-				{
-					if ((file_status.eTag_rcrd == null) || (file_status.eTag_data == null))
-					{
-						done_polling_files = false;
-					}
-				}
-
-				next.upload_state!.polling_count++;
-				next.upload_state!.done_polling_files = done_polling_files;
-
-				return next;
-
-			}, ()=> {
-
-				const upload_state = this.state.upload_state!;
-				if (upload_state.done_polling_files)
-				{
-					this.uploadNext();
-				}
-				else
-				{
-					const delay = this.getPollingBackoff(upload_state.polling_count);
-
-					setTimeout(()=> {
-						this.uploadNext();
-
-					}, delay);
-				}
 			});
 		}
 
@@ -2803,7 +2641,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const s3 = new S3({
 				credentials : state.credentials,
-				region      : 'us-west-2'
+				region      : user_profile.s4.region
 			});
 
 			const upload = s3.upload({
@@ -2842,6 +2680,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				if (next.upload_state && next.upload_state.msg)
 				{
 					next.upload_state.polling_count = 0;
+					next.upload_state.touch_count = 0;
 					next.upload_state.msg.anonymous_id = state.anonymous_id;
 					next.upload_state.msg.has_uploaded_rcrd = true;
 				}
@@ -2865,13 +2704,52 @@ class Send extends React.Component<ISendProps, ISendState> {
 		_generateRcrdData();
 	}
 
-	protected uploadMessage_pollStatus(): void
+	protected uploadPoll(): void
 	{
-		const METHOD_NAME = "uploadMessage_pollStatus()";
+		const METHOD_NAME = "uploadPoll()";
 		log.debug(`${METHOD_NAME}`);
 
-		const _generateJSON = (): void => {
-			const SUB_METHOD_NAME = "_generateRcrdData()";
+		const _generateJSON_files = (): void => {
+			const SUB_METHOD_NAME = "_generateJSON_files()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const upload_state = this.state.upload_state!;
+
+			const json: S4PollRequest = {
+				requests: []
+			};
+
+			for (const file_state of upload_state.files)
+			{
+				if (file_state.eTag_rcrd == null)
+				{
+					const anonymous_id = file_state.anonymous_id_rcrd || "";
+					const request_id   = file_state.request_id_rcrd   || "";
+
+					json.requests.push([anonymous_id, request_id])
+				}
+				if (file_state.eTag_data == null)
+				{
+					const anonymous_id = file_state.anonymous_id_data || "";
+					const request_id   = file_state.request_id_data   || "";
+
+					json.requests.push([anonymous_id, request_id])
+				}
+			}
+
+			const max_requests = 50;
+			if (json.requests.length > max_requests) {
+				json.requests = json.requests.slice(0, max_requests);
+			}
+
+			const json_str = JSON.stringify(json, null, 2)
+
+			// Next step
+			_fetchCredentials({type:"files", json_str});
+		}
+
+		const _generateJSON_msg = (): void => {
+			const SUB_METHOD_NAME = "_generateJSON_msg()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
 			const upload_state = this.state.upload_state!;
@@ -2890,11 +2768,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const json_str = JSON.stringify(json, null, 0);
 
 			// Next step
-			_fetchCredentials({json_str});
+			_fetchCredentials({type:"msg", json_str});
 		}
 
 		const _fetchCredentials = (
 			state: {
+				type     : "files"|"msg",
 				json_str : string
 			}
 		): void =>
@@ -2915,6 +2794,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performUpload = (
 			state: {
+				type        : "files"|"msg",
 				json_str    : string,
 				credentials : AWSCredentials
 			}
@@ -2923,7 +2803,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const host = api_gateway.getHost();
+			const user_profile = this.state.user_profile!;
+
+			const host = api_gateway.getHost(user_profile.s4.region);
 			const path = api_gateway.getPath("/poll-request");
 
 			const url = `https://${host}${path}`;
@@ -2955,8 +2837,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 				log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}: response: `+ JSON.stringify(json, null, 2));
 
 				const response = json as S4PollResponse;
-
-				_succeed({...state, response});
+				if (state.type == "files") {
+					_succeed_files({...state, response});
+				}
+				else {
+					_succeed_msg({...state, response});
+				}
 
 			}).catch((err)=> {
 
@@ -2966,14 +2852,77 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
-		const _succeed = (
+		const _succeed_files = (
 			state: {
+				type        : "files"|"msg",
+				json_str    : string,
+				credentials : AWSCredentials
+				response    : S4PollResponse
+			}
+		): void =>
+		{
+			log.err(`${METHOD_NAME}._succeed_files()`);
+			
+			let done_polling_files = true;
+			this.setState((current)=> {
+				
+				const next = _.cloneDeep(current) as ISendState;
+
+				for (const file_status of next.upload_state!.files)
+				{
+					if (file_status.eTag_rcrd == null)
+					{
+						const poll_response = state.response[file_status.request_id_rcrd];
+						if (poll_response && poll_response.status == 200)
+						{
+							if (poll_response.info)
+							{
+								file_status.eTag_rcrd = poll_response.info.eTag   || "unknown";
+								file_status.cloud_id  = poll_response.info.fileID || "unknown";
+							}
+						}
+					}
+					if (file_status.eTag_data == null)
+					{
+						const poll_response = state.response[file_status.request_id_data];
+						if (poll_response && poll_response.status == 200)
+						{
+							if (poll_response.info)
+							{
+								file_status.eTag_data = poll_response.info.eTag || "unknown";
+							}
+						}
+					}
+				}
+
+				for (const file_status of next.upload_state!.files)
+				{
+					if ((file_status.eTag_rcrd == null) || (file_status.eTag_data == null))
+					{
+						done_polling_files = false;
+					}
+				}
+
+				next.upload_state!.polling_count++;
+				next.upload_state!.done_polling_files = done_polling_files;
+
+				return next;
+
+			}, ()=> {
+
+				_succeed_next(state.type, done_polling_files);
+			});
+		}
+
+		const _succeed_msg = (
+			state: {
+				type        : "files"|"msg",
 				json_str    : string,
 				credentials : AWSCredentials
 				response    : S4PollResponse
 			}
 		): void => {
-			log.err(`${METHOD_NAME}._succeed()`);
+			log.err(`${METHOD_NAME}._succeed_msg()`);
 
 			const {response} = state;
 			const msg_state = this.state.upload_state!.msg!;
@@ -2999,17 +2948,37 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			}, ()=> {
 
-				if (!done_polling)
-				{
-					const upload_state = this.state.upload_state!;
-					const delay = this.getPollingBackoff(upload_state.polling_count);
-
-					setTimeout(()=> {
-						this.uploadNext();
-
-					}, delay);
-				}
+				_succeed_next(state.type, done_polling);
 			});
+		}
+
+		const _succeed_next = (
+			type         : "files"|"msg",
+			done_polling : boolean
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._succeed_next()`);
+			log.debug('polling_count: '+ this.state.upload_state!.polling_count);
+
+			if (done_polling)
+			{
+				if (type == "files") {
+					this.uploadNext();
+				}
+				else {
+					// we're done !
+				}
+			}
+			else
+			{
+				const upload_state = this.state.upload_state!;
+				const delay = this.getPollingBackoff(upload_state.polling_count);
+
+				setTimeout(()=> {
+					this.uploadNext();
+
+				}, delay);
+			}
 		}
 
 		const _fail = (upload_err_fatal?: string): void => {
@@ -3020,7 +2989,159 @@ class Send extends React.Component<ISendProps, ISendState> {
 			this.uploadFail(upload_err_fatal);
 		}
 
-		_generateJSON();
+		{ // Scoping
+
+			const upload_state = this.state.upload_state!;
+			if (upload_state.done_polling_files) {
+				_generateJSON_msg();
+			}
+			else {
+				_generateJSON_files();
+			}
+		}
+	}
+
+	protected uploadTouch(): void
+	{
+		const METHOD_NAME = "uploadTouch()";
+		log.debug(`${METHOD_NAME}`);
+
+		const _fetchCredentials = (
+			state: {
+				type : "files"|"msg",
+				key  : string
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._fetchCredentials()`);
+
+			credentials_helper.getCredentials((err, credentials)=> {
+
+				if (credentials) {
+					_performUpload({...state, credentials});
+				}
+				else {
+					log.err("Error fetching anonymous AWS credentials: "+ err);
+					_fail();
+				}
+			});
+		}
+
+		const _performUpload = (
+			state: {
+				type        : "files"|"msg",
+				key         : string,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			const SUB_METHOD_NAME = "_performUpload()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const user_profile = this.state.user_profile!;
+
+			const s3 = new S3({
+				credentials : state.credentials,
+				region      : user_profile.s4.region
+			});
+
+			s3.upload({
+				Bucket        : user_profile.s4.bucket,
+				Key           : state.key,
+				Body          : ''
+
+			}, (err, data)=> {
+
+				if (err)
+				{
+					log.err("s3.upload.send(): err: "+ err);
+
+					_fail();
+					return;
+				}
+				
+				// Next step
+				_succeed(state);
+			});
+		}
+
+		const _succeed = (
+			state: {
+				type        : "files"|"msg",
+				key         : string,
+				credentials : AWSCredentials
+			}
+		): void =>
+		{
+			log.debug(`${METHOD_NAME}._succeed()`);
+
+			this.setState((current)=> {
+
+				const next = _.cloneDeep(current);
+				next.upload_state!.touch_count++;
+
+				return next;
+
+			}, ()=> {
+
+				log.debug('polling_count: '+ this.state.upload_state!.polling_count);
+				log.debug('touch_count: '+ this.state.upload_state!.touch_count);
+
+				this.uploadNext();
+			});
+		}
+
+		const _fail = (upload_err_fatal?: string): void =>
+		{
+			log.debug(`${METHOD_NAME}._fail()`);
+
+			// Reserved for step-specific failure code
+			
+			this.uploadFail(upload_err_fatal);
+		}
+
+		{ // Scoping
+
+			const upload_state = this.state.upload_state!;
+			if (upload_state.done_polling_files)
+			{
+				// We're polling the msg
+
+				const msg_state = upload_state.msg!;
+				const key = this.getStagingPathForMsg({msg_state, touch:true});
+
+				_fetchCredentials({type:"msg", key});
+			}
+			else
+			{
+				// We're polling a file
+
+				let key: string|null = null;
+
+				for (const file_state of upload_state.files)
+				{
+					if (file_state.eTag_rcrd == null)
+					{
+						key = this.getStagingPathForFile({file_state, ext:"rcrd", touch:true});
+						break;
+					}
+					else if (file_state.eTag_data == null)
+					{
+						key = this.getStagingPathForFile({file_state, ext:"data", touch:true});
+						break;
+					}
+				}
+
+				if (key)
+				{
+					_fetchCredentials({type:"files", key});
+				}
+				else
+				{
+					log.err("Bad state: Cannot find file that requires touch operation !");
+				}
+			}
+		}
 	}
 
 	protected uploadFail(
@@ -3997,7 +4118,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			else if (upload_state.msg && ! upload_state.msg.has_uploaded_rcrd) {
 				is_uploading_msg = true;
 			}
-			else if ( ! upload_state.done_polling_msg) {
+			else {
 				is_polling_msg = true;
 			}
 		}

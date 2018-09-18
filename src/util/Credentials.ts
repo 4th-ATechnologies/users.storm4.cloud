@@ -82,7 +82,7 @@ export function getCredentials(
 		return;
 	}
 
-	const host = apiGateway.getHost();
+	const host = apiGateway.getHost('us-west-2');
 	const path = apiGateway.getPath("/delegation");
 
 	const url = (prev_anonymous_id != null) ?

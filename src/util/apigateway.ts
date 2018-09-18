@@ -10,19 +10,48 @@ export function getStage(): string
 	return stage;
 }
 
-export function getAPIGatewayID(): string
+export function getAPIGatewayID(region: string): string
 {
-	switch (getStage())
+	switch (region)
 	{
-		case "dev" : return "pzg66sum7l";
-		case "test": return "xvsiisz5m0";
-		default    : return "4trp9uu0h1";
+		case 'us-west-2':
+		{
+			switch (getStage())
+			{
+				case "dev" : return "pzg66sum7l";
+				case "test": return "xvsiisz5m0";
+				default    : return "4trp9uu0h1";
+			}
+		}
+		case 'eu-west-1':
+		{
+			switch (getStage())
+			{
+				case "dev" : return "74bukw6pwc";
+				case "test": return "3ip9q72kwf";
+				default    : return "b0mf3mdmt0";
+			}
+		}
+		default:
+		{
+			return "unknown";
+		}
 	}
 }
 
-export function getHost(): string
+export function getHost(region: string): string
 {
-	return (getAPIGatewayID() +".execute-api.us-west-2.amazonaws.com");
+	const prefix = getAPIGatewayID(region);
+
+	let suffix: string;
+	switch (region)
+	{
+		case 'us-west-2': suffix = ".execute-api.us-west-2.amazonaws.com"; break;
+		case 'eu-west-1': suffix = ".execute-api.eu-west-1.amazonaws.com"; break;
+		default         : suffix = `.execute-api.${region}.amazonaws.com`; break;
+	}
+
+	return (prefix + suffix);
 }
 
 export function getPath(path: string): string
