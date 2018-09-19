@@ -101,9 +101,6 @@ export function fetchUserProfile(
 		if (reason == null)
 		{
 			// This is why I don't like promises...
-			// This is called when the statusCode != 200.
-			// 
-			// Yup, it's retarded.
 		}
 		else
 		{

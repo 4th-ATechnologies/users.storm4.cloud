@@ -23,7 +23,9 @@
     "utf8": "^3.0.0"
   },
   "scripts": {
+    "prestart": "node scripts/prestart.js",
     "start": "react-scripts-ts start",
+    "prebuild": "node scripts/prebuild.js",
     "build": "react-scripts-ts build",
     "test": "react-scripts-ts test --env=jsdom",
     "eject": "react-scripts-ts eject"
@@ -43,6 +45,7 @@
     "@types/react-dropzone": "^4.2.2",
     "@types/react-router-dom": "^4.3.0",
     "@types/utf8": "^2.1.6",
+    "shelljs": "^0.8.2",
     "typescript": "^3.0.1"
   },
   "homepage": "https://users.storm4.cloud"

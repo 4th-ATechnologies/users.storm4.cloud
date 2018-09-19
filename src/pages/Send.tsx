@@ -901,9 +901,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 			if (reason == null)
 			{
 				// This is why I don't like promises...
-				// This is called when the statusCode != 200.
-				// 
-				// Yup, it's retarded.
 			}
 			else
 			{
