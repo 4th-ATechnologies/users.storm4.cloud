@@ -655,7 +655,11 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 				// 
 				for (const searchResult of searchResults.results)
 				{
-					this.postProcessSearchResult(search_query, searchResult);
+					this.postProcessSearchResult({
+						query    : searchResults.query,
+						provider : searchResults.provider,
+						searchResult
+					});
 				}
 			}
 
@@ -697,11 +701,16 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		});
 	}
 
-	protected postProcessSearchResult = (
-		query        : string,
-		searchResult : SearchResult
-	): void =>
+	protected postProcessSearchResult(
+		options: {
+			query        : string,
+			provider     : string,
+			searchResult : SearchResult
+		}
+	): void
 	{
+		const {query, provider, searchResult} = options;
+
 		const queryComponents = query.split(' ').filter((str)=> {
 			return str.length > 0;
 		}).map((str)=> {
@@ -710,6 +719,11 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 
 		const identities = searchResult.auth0.identities;
 		searchResult.auth0.matches = [];
+
+		// For each identity linked to the user's account,
+		// we're going to calculate:
+		// - the range(s) of the display name which match the given query
+		// - an estimated points systems based on how strongly the identity matches the query
 
 		identities.forEach((identity, identityIdx) => {
 
@@ -722,7 +736,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			const displayName = util.displayNameForIdentity(identity, searchResult.s4).toLowerCase();
 
 			const imgUrl = util.imageUrlForIdentity(identity, searchResult.s4);
-			if (imgUrl != null) {
+			if (imgUrl != null)
+			{
+				// +1 point for the identity having an avatar
 				matchInfo.points++;
 			}
 
@@ -735,8 +751,9 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 						indexStart : matchIndex,
 						indexEnd   : matchIndex + queryComponent.length
 					};
-
 					matchInfo.boldRanges.push(range);
+
+					// +1 point for the query match
 					matchInfo.points++;
 				}
 			}
@@ -787,50 +804,74 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 			searchResult.auth0.matches.push(matchInfo);
 		});
 
-		const sortedMatches = Array.from(searchResult.auth0.matches);
-		sortedMatches.sort((a, b)=> {
+		if (provider == '*')
+		{
+			// We were searching across all providers.
+			// The the preferred identity (for each user) will be the one with the highest score.
 
-			// If compareFunction(a, b) returns less than 0,
-			// sort a to an index lower than b, i.e. a comes first.
-			//
-			// If compareFunction(a, b) returns 0,
-			// leave a and b unchanged with respect to each other,
-			// but sorted with respect to all different elements.
-			// 
-			// If compareFunction(a, b) returns greater than 0,
-			// sort b to an index lower than a, i.e. b comes first.
+			const sortedMatches = Array.from(searchResult.auth0.matches);
+			sortedMatches.sort((a, b)=> {
 
-			let a_points = a.points;
-			let b_points = b.points;
+				// If compareFunction(a, b) returns less than 0,
+				// sort a to an index lower than b, i.e. a comes first.
+				//
+				// If compareFunction(a, b) returns 0,
+				// leave a and b unchanged with respect to each other,
+				// but sorted with respect to all different elements.
+				// 
+				// If compareFunction(a, b) returns greater than 0,
+				// sort b to an index lower than a, i.e. b comes first.
 
-			let diff = b_points - a_points;
-			if (diff != 0) {
-				return diff;
+				let a_points = a.points;
+				let b_points = b.points;
+
+				const diff = b_points - a_points;
+				if (diff != 0) {
+					return diff;
+				}
+
+				const preferred =
+				  searchResult.auth0.user_metadata.preferedAuth0ID ||
+				  searchResult.auth0.user_metadata.preferredAuth0ID;
+
+				const a_identity = searchResult.auth0.identities[a.idx];
+				const b_identity = searchResult.auth0.identities[b.idx];
+
+				const a_id = a_identity.provider +'|'+ a_identity.user_id;
+				const b_id = b_identity.provider +'|'+ b_identity.user_id;
+
+				if (preferred == a_id) {
+					a_points++;
+				}
+				if (preferred == b_id) {
+					b_points++;
+				}
+
+				return (b_points - a_points);
+			});
+
+			const bestMatchIdx = sortedMatches[0].idx;
+			searchResult.auth0.displayIdx = bestMatchIdx;
+		}
+		else
+		{
+			// We were searching a particular provider.
+			// So the preferred identity is simply that provider.
+
+			let bestMatchIdx = 0;
+
+			for (let i = 0; i < searchResult.auth0.identities.length; i++)
+			{
+				const identity = searchResult.auth0.identities[i];
+				if (identity.provider == provider)
+				{
+					bestMatchIdx = i;
+					break;
+				}
 			}
 
-			const preferred =
-			  searchResult.auth0.user_metadata.preferedAuth0ID ||
-			  searchResult.auth0.user_metadata.preferredAuth0ID;
-
-			const a_identity = searchResult.auth0.identities[a.idx];
-			const b_identity = searchResult.auth0.identities[b.idx];
-
-			const a_id = a_identity.provider +'|'+ a_identity.user_id;
-			const b_id = b_identity.provider +'|'+ b_identity.user_id;
-
-			if (preferred == a_id) {
-				a_points++;
-			}
-			if (preferred == b_id) {
-				b_points++;
-			}
-
-			diff = b_points - a_points;
-			return diff;
-		});
-
-		const bestMatchIdx = sortedMatches[0].idx;
-		searchResult.auth0.displayIdx = bestMatchIdx;
+			searchResult.auth0.displayIdx = bestMatchIdx;
+		}
 
 		log.debug('searchResult.auth0: '+ JSON.stringify(searchResult.auth0, null, 2));
 	}
