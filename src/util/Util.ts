@@ -225,27 +225,46 @@ export function rpcJSON(user_id: string): any
 	}
 }
 
+export function ensureHexPrefix(str: string): string
+{
+	if (str.startsWith('0x')) {
+		return str;
+	}
+	if (str.startsWith('0X')) {
+		return ('0x'+ str.substring(2));
+	}
+
+	return ('0x'+ str);
+}
+
+export function stripHexPrefix(str: string): string
+{
+	if (str.startsWith("0x") || str.startsWith("0X")) {
+		return str.substring(2);
+	}
+
+	return str;
+}
+
 export function transactionData(user_id: string): string
 {
+	const user_id_hex = stripHexPrefix(userID2Hex(user_id));
+	
 	// Data Layout:
 	//
 	// - First 4 bytes : Function signature
-	// - Next 32 bytes : bytes20 (aligned left) : userID
-	// - Next 32 bytes : uint8   (aligned left) : hashTypeID
+	// - Next 32 bytes : bytes20 : userID
+	// - Next 32 bytes : uint8   : hashTypeID
+	// 
+	// Note:
+	// 1 byte == 2 hex characters
+	// 32 bytes == 64 hex chacters
 
-	let result = "0x4326e22b";
+	let tx_data = "0x4326e22b";
+	tx_data += _.padEnd(user_id_hex, 64, '0');
+	tx_data += _.padStart('', 64, '0');
 
-	let userID_hex = userID2Hex(user_id);
-	if (userID_hex.startsWith('0x') || userID_hex.startsWith('0X')) {
-		userID_hex = userID_hex.substring(2);
-	}
-
-	result += userID_hex;
-	result += "0000000000000000000000000000000000000000000000000000000000000000";
-	//         1234567890123456789012345678901234567890123456789012345678901234
-	//                 10        20        30        40        50        64  64
-
-	return result;
+	return tx_data;
 }
 
 export function extractMerkleTreeRoot(response: any): string
@@ -261,9 +280,7 @@ export function extractMerkleTreeRoot(response: any): string
 		return '';
 	}
 
-	if (encoded.startsWith('0x') || encoded.startsWith('0X')) {
-		encoded = encoded.substring(2);
-	}
+	encoded = stripHexPrefix(encoded);
 
 	// The response value is of type `bytes`,
 	// which is a dynamically sized element.

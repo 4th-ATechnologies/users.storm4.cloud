@@ -20,7 +20,7 @@
     "react-image-fallback": "^8.0.0",
     "react-router-dom": "^4.3.1",
     "react-scripts-ts": "2.17.0",
-    "utf8": "^3.0.0"
+    "text-encoding-utf-8": "^1.0.2"
   },
   "scripts": {
     "prestart": "node scripts/prestart.js",
@@ -44,7 +44,7 @@
     "@types/react-dom": "^16.0.7",
     "@types/react-dropzone": "^4.2.2",
     "@types/react-router-dom": "^4.3.0",
-    "@types/utf8": "^2.1.6",
+    "@types/text-encoding-utf-8": "^1.0.1",
     "shelljs": "^0.8.2",
     "typescript": "^3.0.1"
   },

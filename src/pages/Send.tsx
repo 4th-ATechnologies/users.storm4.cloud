@@ -13,12 +13,21 @@ import ReactImageFallback from 'react-image-fallback';
 import {Credentials as AWSCredentials} from 'aws-sdk';
 import {RouteComponentProps} from 'react-router';
 import {withRouter} from 'react-router-dom'
-//import {encode as utf8_encode} from 'utf8';
+import {TextEncoder} from 'text-encoding-utf-8'
 
 import * as api_gateway from '../util/APIGateway';
 import * as credentials_helper from '../util/Credentials';
 import * as util from '../util/Util';
 import * as users_cache from '../util/UsersCache';
+
+import {S4, S4Module, S4CipherAlgorithm} from '../util/S4';
+
+interface ModuleLoader extends S4Module {
+	isRuntimeInitialized: boolean
+}
+
+declare var onModuleInitialized: any[];
+declare var Module: ModuleLoader;
 
 import {Logger} from '../util/Logging'
 
@@ -518,6 +527,9 @@ interface ISendState {
 	upload_err_retry  : number|null,
 	upload_err_fatal  : string|null
 	upload_state      : UploadState|null,
+
+	// S4 encryption library
+	s4 : S4|null
 }
 
 function getStartingState(): ISendState {
@@ -551,12 +563,14 @@ function getStartingState(): ISendState {
 		file_list           : [],
 		commentTextFieldStr : "",
 
-		is_uploading      : false,
-		upload_index      : 0,
-		upload_success    : false,
-		upload_err_retry  : null,
-		upload_err_fatal  : null,
-		upload_state      : null
+		is_uploading     : false,
+		upload_index     : 0,
+		upload_success   : false,
+		upload_err_retry : null,
+		upload_err_fatal : null,
+		upload_state     : null,
+
+		s4: null
 	};
 	return state;
 }
@@ -1492,6 +1506,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
+			const s4 = this.state.s4!;
+
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
 
@@ -1510,12 +1526,15 @@ class Send extends React.Component<ISendProps, ISendState> {
 					filename : file.name
 				};
 	
-				const metadata_cleartext = JSON.stringify(metadata_obj, null, 0);
+				const metadata_cleartext_str = JSON.stringify(metadata_obj, null, 0);
+				const metadata_cleartext_data = TextEncoder().encode(metadata_cleartext_str);
+				
 				// 
 				// Todo: encrypt metadata
 				// Need: Threeefish 512 support in JS
 				//
-				json.metadata = metadata_cleartext;
+
+				json.metadata = metadata_cleartext_str;
 			}
 			{ // keys
 	
@@ -2575,12 +2594,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 					index++;
 				}
 	
-				const data_cleartext = JSON.stringify(data_obj, null, 0);
+				const data_cleartext_str = JSON.stringify(data_obj, null, 0);
+				const data_cleartext_data = TextEncoder().encode(data_cleartext_str);
 				// 
 				// Todo: encrypt metadata
 				// Need: Threeefish 512 support in JS
 				//
-				json.data = data_cleartext;
+				json.data = data_cleartext_str;
 			}
 			{ // key
 	
@@ -4641,9 +4661,35 @@ class Send extends React.Component<ISendProps, ISendState> {
 	 * - componentDidMount()
 	 * - onStartOver();
 	**/
-	public bootstrap() {
-
+	public bootstrap()
+	{
 		this.fetchUserProfile();
+
+		const wasmReady = ()=> {
+
+			const s4 = S4.load(Module);
+			if (s4 == null)
+			{
+				log.err("Failed loading WASM crypto library !");
+			}
+			else
+			{
+				log.debug("WASM crypto library ready");
+				this.setState({
+					s4
+				});
+			}
+		}
+
+		if (Module.isRuntimeInitialized) {
+			wasmReady();
+		}
+		else {
+			log.debug("Waiting for WASM crypto library...");
+			onModuleInitialized.push(()=> {
+				wasmReady();
+			});
+		}
 	}
 }
 
