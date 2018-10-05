@@ -1301,7 +1301,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			return;
 		}
 
-		this.uploadNext();
+		this.runTests();
+	//	this.uploadNext();
 	}
 
 	protected onRetryTimerTick = (): void => {
@@ -1366,6 +1367,32 @@ class Send extends React.Component<ISendProps, ISendState> {
 			return getStartingState();
 		}, ()=> {
 			this.bootstrap();
+		});
+	}
+
+	protected runTests(): void {
+		log.debug("runTests()");
+
+		const encryption_key = util.randomEncryptionKey();
+		const random_filename = util.randomFileName();
+
+		const request_id_rcrd = util.randomHexString(16);
+		const request_id_data = util.randomHexString(16);
+
+		const file_state: UploadState_File = {
+			encryption_key,
+			random_filename,
+			request_id_rcrd,
+			request_id_data,
+			file_preview      : null,
+			has_uploaded_rcrd : false,
+			unipart_progress  : 0
+		};
+
+		util.wrapSymmetricKey({
+			s4            : global_s4!,
+			public_key    : this.state.public_key!,
+			symmetric_key : file_state.encryption_key
 		});
 	}
 
@@ -1571,6 +1598,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 					const key_id = `UID:${this.props.user_id}`;
 	
+					util.wrapSymmetricKey({
+						s4            : global_s4!,
+						public_key    : this.state.public_key!,
+						symmetric_key : file_state.encryption_key
+					});
 					// 
 					// Todo: encrypt key
 					// Need: ECC 41417 support in JS

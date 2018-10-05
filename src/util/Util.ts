@@ -1,13 +1,22 @@
 import * as _ from 'lodash';
 import * as hasha from 'hasha';
 
+import {TextEncoder} from 'text-encoding-utf-8'
+
 import * as api_gateway from './APIGateway';
 import * as base32 from '../util/Base32Decode';
 
-import {S4, S4HashAlgorithm, S4CipherAlgorithm} from './S4';
 import {Logger} from '../util/Logging'
 
 import {
+	S4,
+	S4HashAlgorithm,
+	S4CipherAlgorithm,
+	S4Property
+} from './S4';
+
+import {
+	PubKey,
 	IdentityProvider,
 	UserInfo,
 	Auth0Identity
@@ -667,4 +676,89 @@ function generateChecksumPrefix(
 	checksum_view.setUint32(/*offset:*/0, /*value:*/checksum, /*littleEndian:*/false);
 
 	return new Uint8Array(checksum_buffer);
+}
+
+export function wrapSymmetricKey(
+	options: {
+		s4            : S4,
+		public_key    : PubKey,
+		symmetric_key : Uint8Array,
+	}
+): Uint8Array|Error
+{
+	const {s4, public_key, symmetric_key} = options;
+
+	log.debug("========== < wrapSymmetricKey() > ==========")
+
+	let context_key: number|null = null;
+	let context_tbc: number|null = null;
+
+	const pubKey_str = JSON.stringify(public_key, null, 0);
+	const pubKey_data = TextEncoder().encode(pubKey_str);
+
+	log.debug("pubKey_str: "+ pubKey_str);
+	log.debug("pubKey_data: "+ s4.util_hexString(pubKey_data));
+
+	context_key = s4.key_deserializeKey(pubKey_data);
+	if (context_key == null)
+	{
+		const err_msg = s4.err_str() || "Unable to deserialize user's public key";
+		log.err(err_msg);
+
+		return _cleanup(new Error(err_msg));
+	}
+
+	const wtf = s4.key_getProperty(context_key, S4Property.KeyData);
+	log.debug("wtf: "+ (wtf ? s4.util_hexString(wtf) : null))
+
+	let cipher_algorithm: S4CipherAlgorithm|null = null;
+	switch (symmetric_key.byteLength * 8)
+	{
+		case  256: cipher_algorithm = S4CipherAlgorithm.THREEFISH256;  break;
+		case  512: cipher_algorithm = S4CipherAlgorithm.THREEFISH512;  break;
+		case 1024: cipher_algorithm = S4CipherAlgorithm.THREEFISH1024; break;
+	}
+
+	if (cipher_algorithm == null)
+	{
+		const err_msg = "Unexpected symmetric_key.length: "+ symmetric_key.length;
+		log.err(err_msg);
+
+		return _cleanup(new Error(err_msg));
+	}
+	log.debug("cipher_algorithm: "+ cipher_algorithm);
+
+	context_tbc = s4.key_newTBC(cipher_algorithm, symmetric_key);
+	if (context_tbc == null)
+	{
+		const err_msg = s4.err_str() || "Unable to initialize TBC.";
+		log.err("s4.key_newTBC(): "+ err_msg);
+
+		return _cleanup(new Error(err_msg));
+	}
+
+	log.debug("symmetric_key: "+ s4.util_hexString(symmetric_key));
+
+	const wrapped = s4.key_wrapToKey(context_key, context_tbc);
+	if (wrapped == null)
+	{
+		const err_msg = s4.err_str() || "Error wrapping symmetric key.";
+		log.err("s4.key_wrapToKey(): "+ err_msg);
+		
+		return _cleanup(new Error(err_msg));
+	}
+	else
+	{
+		log.debug("wrapped: "+ s4.util_hexString(wrapped));
+		return _cleanup(wrapped);
+	}
+
+	function _cleanup(result: Uint8Array|Error): Uint8Array|Error 
+	{
+		if (context_key) { s4.key_free(context_key); }
+		if (context_tbc) { s4.key_free(context_tbc); }
+
+		log.debug("========== </ wrapSymmetricKey() > ==========")
+		return result;
+	}
 }

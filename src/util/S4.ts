@@ -40,8 +40,6 @@ export interface S4Module extends EmscriptenModule {
 	_S4_Init: ()=> S4Err
 }
 
-export const S4HashContextAllocSize = 512; // bytes
-
 export enum S4Err
 {
 	NoErr                  =  0,
@@ -119,6 +117,43 @@ export enum S4CipherAlgorithm
 	ECC414        =  301, /*  Dan Bernstein Curve3617  */
 };
 
+export enum S4Property {
+	KeyType            = "keyType",
+	KeySuite           = "keySuite",
+	HashAlgorithm      = "hashAlgorithm",
+	KeyData            = "keyData",
+	KeyID              = "keyID",
+	KeyIDString        = "keyID-String",
+	Mac                = "mac",
+	StartDate          = "start-date",
+	ExpireDate         = "expire-date",
+	EncryptedKey       = "encrypted",
+	Encoding           = "encoding",
+	Signature          = "signature",
+	SignedBy           = "issuer",
+	SignedProperties   = "signed-properties",
+	SignableProperties = "signable-properties",
+	SignedDate         = "issue-date",
+	SigExpire          = "sig-expire",
+	SigID              = "sigID"
+}
+
+enum S4PropertyType
+{
+	Invalid       = 0,
+	UTF8String    = 1,
+	Binary        = 2,
+	Time          = 3,
+	Numeric       = 4,
+};
+
+
+type EmscriptenTuple =
+	["number",  number]     |
+	["string",  string]     |
+	["array",   Uint8Array] |
+	["boolean", boolean];
+
 export class S4 {
 
 	public static load(module: any): S4|null
@@ -147,6 +182,23 @@ export class S4 {
 		}
 	}
 
+	private ccall_wrapper(
+		ident      : string,
+		returnType : EmscriptenJavascriptType,
+		params     : EmscriptenTuple[]
+	): any
+	{
+		const argTypes: EmscriptenJavascriptType[] = [];
+		const args: any[] = [];
+
+		for (const tuple of params) {
+			argTypes.push(tuple[0]);
+			args.push(tuple[1]);
+		}
+
+		return this.module.ccall(ident, returnType, argTypes, args);
+	}
+
 	/**
 	 * ----- General -----
 	**/
@@ -158,9 +210,11 @@ export class S4 {
 		const max_bytes = 256;
 		const ptr = this.module._malloc(max_bytes);
 		
-		this.err_code = this.module.ccall(
-			"S4_GetVersionString", "number", ["number", "number"],
-			[max_bytes, ptr]
+		this.err_code = this.ccall_wrapper(
+			"S4_GetVersionString", "number", [
+				["number", max_bytes],
+				["number", ptr]
+			]
 		);
 
 		let result = "";
@@ -182,9 +236,12 @@ export class S4 {
 
 		const input = (in_err_code == null) ? this.err_code : in_err_code;
 
-		this.err_code = this.module.ccall(
-			"S4_GetErrorString", "number", ["number", "number", "number"],
-			[input, max_bytes, ptr]
+		this.err_code = this.ccall_wrapper(
+			"S4_GetErrorString", "number", [
+				["number", input],
+				["number", max_bytes],
+				["number", ptr]
+			]
 		);
 
 		let result = "";
@@ -225,7 +282,7 @@ export class S4 {
 	 * Performs a hash in one step.
 	 * If null is returned, check err_code/err_str property for more information.
 	 */
-	public hash_do(algorithm: S4HashAlgorithm, data: Uint8Array|Int8Array): Uint8Array|null
+	public hash_do(algorithm: S4HashAlgorithm, data: Uint8Array): Uint8Array|null
 	{
 		// S4Err HASH_DO(HASH_Algorithm algorithm,
 		//               const void*    in,
@@ -240,10 +297,14 @@ export class S4 {
 
 		const ptr = this.module._malloc(num_bytes);
 
-		this.err_code = this.module.ccall(
-			"HASH_DO", "number",
-			["number", "array", "number", "number", "number"],
-			[algorithm, data, data.byteLength, num_bytes, ptr]
+		this.err_code = this.ccall_wrapper(
+			"HASH_DO", "number", [
+				["number", algorithm],
+				["array",  data],
+				["number", data.byteLength],
+				["number", num_bytes],
+				["number", ptr]
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -262,9 +323,11 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"HASH_GetHashSize", "number", ["number", "number"],
-			[algorithm, ptr]
+		this.err_code = this.ccall_wrapper(
+			"HASH_GetHashSize", "number", [
+				["number", algorithm],
+				["number", ptr]
+			]
 		);
 
 		let result = 0;
@@ -281,9 +344,10 @@ export class S4 {
 	{
 		// bool HASH_AlgorithmIsAvailable(HASH_Algorithm algorithm);
 
-		const result = this.module.ccall(
-			"HASH_AlgorithmIsAvailable", "number", ["number"],
-			[algorithm]
+		const result = this.ccall_wrapper(
+			"HASH_AlgorithmIsAvailable", "number", [
+				["number", algorithm]
+			]
 		);
 
 		return result;
@@ -291,13 +355,16 @@ export class S4 {
 
 	public hash_init(algorithm: S4HashAlgorithm): number|null
 	{
-		// S4Err HASH_Init(HASH_Algorithm algorithm, HASH_ContextRef * ctx);
+		// S4Err HASH_Init(HASH_Algorithm   algorithm,
+		//                 HASH_ContextRef* ctx);
 
 		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
-		this.err_code = this.module.ccall(
-			"HASH_Init", "number", ["number", "number"],
-			[algorithm, ptr]
+		this.err_code = this.ccall_wrapper(
+			"HASH_Init", "number", [
+				["number", algorithm],
+				["number", ptr]
+			]
 		);
 
 		let context: number|null = null;
@@ -316,9 +383,11 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"HASH_GetSize", "number", ["number", "number"],
-			[context, ptr]
+		this.err_code = this.ccall_wrapper(
+			"HASH_GetSize", "number", [
+				["number", context],
+				["number", ptr]
+			]
 		);
 
 		let result = 0;
@@ -331,13 +400,16 @@ export class S4 {
 		return result;
 	}
 
-	public hash_update(context: number, data: Uint8Array|Int8Array): S4Err
+	public hash_update(context: number, data: Uint8Array): S4Err
 	{
 		// S4Err HASH_Update(HASH_ContextRef ctx, const void *data, size_t dataLength);
 
-		this.err_code = this.module.ccall(
-			"HASH_Update", "number", ["number", "array", "number"],
-			[context, data, data.byteLength]
+		this.err_code = this.ccall_wrapper(
+			"HASH_Update", "number", [
+				["number", context],
+				["array",  data],
+				["number", data.byteLength]
+			]
 		);
 		
 		return this.err_code;
@@ -355,9 +427,11 @@ export class S4 {
 
 		const ptr = this.module._malloc(num_bytes);
 
-		this.err_code = this.module.ccall(
-			"HASH_Final", "number", ["number", "number"],
-			[context, ptr]
+		this.err_code = this.ccall_wrapper(
+			"HASH_Final", "number", [
+				["number", context],
+				["number", ptr]
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -374,9 +448,10 @@ export class S4 {
 	{
 		// S4Err HASH_Reset(HASH_ContextRef  ctx);
 
-		this.err_code = this.module.ccall(
-			"HASH_Reset", "number", ["number"],
-			[context]
+		this.err_code = this.ccall_wrapper(
+			"HASH_Reset", "number", [
+				["number", context]
+			]
 		);
 
 		return this.err_code;
@@ -386,9 +461,10 @@ export class S4 {
 	{
 		// void HASH_Free(HASH_ContextRef  ctx);
 
-		this.module.ccall(
-			"HASH_Free", null, ["number"],
-			[context]
+		this.ccall_wrapper(
+			"HASH_Free", null, [
+				["number", context]
+			]
 		);
 	}
 
@@ -413,9 +489,11 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"Cipher_GetSize", "number", ["number", "number"],
-			[algorithm, ptr]
+		this.err_code = this.ccall_wrapper(
+			"Cipher_GetSize", "number", [
+				["number", algorithm],
+				["number", ptr]
+			]
 		);
 
 		let result = 0;
@@ -440,9 +518,11 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"Cipher_GetKeySize", "number", ["number", "number"],
-			[algorithm, ptr]
+		this.err_code = this.ccall_wrapper(
+			"Cipher_GetKeySize", "number", [
+				["number", algorithm],
+				["number", ptr]
+			]
 		);
 
 		let result = 0;
@@ -464,9 +544,11 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"Cipher_GetBlockSize", "number", ["number", "number"],
-			[algorithm, ptr]
+		this.err_code = this.ccall_wrapper(
+			"Cipher_GetBlockSize", "number", [
+				["number", algorithm],
+				["number", ptr]
+			]
 		);
 
 		let result = 0;
@@ -483,9 +565,10 @@ export class S4 {
 	{
 		// bool Cipher_AlgorithmIsAvailable(Cipher_Algorithm algorithm);
 
-		const result = this.module.ccall(
-			"Cipher_AlgorithmIsAvailable", "number", ["number"],
-			[algorithm]
+		const result = this.ccall_wrapper(
+			"Cipher_AlgorithmIsAvailable", "number", [
+				["number", algorithm]
+			]
 		);
 
 		return result;
@@ -517,10 +600,16 @@ export class S4 {
 		const ptr_ptr_data = this.module._malloc(NUM_BYTES_POINTER);
 		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"CBC_EncryptPAD", "number",
-			["number", "array", "array", "array", "number", "number", "number"],
-			[algorithm, key,     iv,      input, input.byteLength, ptr_ptr_data, ptr_size]
+		this.err_code = this.ccall_wrapper(
+			"CBC_EncryptPAD", "number", [
+				["number", algorithm],
+				["array",  key],
+				["array",  iv],
+				["array",  input],
+				["number", input.byteLength],
+				["number", ptr_ptr_data],
+				["number", ptr_size],
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -561,10 +650,16 @@ export class S4 {
 		const ptr_ptr_data = this.module._malloc(NUM_BYTES_POINTER);
 		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"CBC_DecryptPAD", "number",
-			["number", "array", "array", "array", "number", "number", "number"],
-			[algorithm, key,     iv,      input, input.byteLength, ptr_ptr_data, ptr_size]
+		this.err_code = this.ccall_wrapper(
+			"CBC_DecryptPAD", "number", [
+				["number", algorithm],
+				["array",  key],
+				["array",  iv],
+				["array",  input],
+				["number", input.byteLength],
+				["number", ptr_ptr_data],
+				["number", ptr_size]
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -601,9 +696,12 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
-		this.err_code = this.module.ccall(
-			"TBC_Init", "number", ["number", "array", "number"],
-			[algorithm, key, ptr]
+		this.err_code = this.ccall_wrapper(
+			"TBC_Init", "number", [
+				["number", algorithm],
+				["array",  key],
+				["number", ptr]
+			]
 		);
 
 		let context: number|null = null;
@@ -621,15 +719,17 @@ export class S4 {
 		// S4Err TBC_SetTweek(TBC_ContextRef ctx,
 		//                    const void*    tweek);
 
-		this.err_code = this.module.ccall(
-			"TBC_SetTweek", "number", ["number", "array"],
-			[context, tweek]
+		this.err_code = this.ccall_wrapper(
+			"TBC_SetTweek", "number", [
+				["number", context],
+				["array",  tweek],
+			]
 		);
 
 		return this.err_code;
 	}
 
-	public tbc_encrypt(context: number, data: Uint8Array|Int8Array): Uint8Array|null
+	public tbc_encrypt(context: number, data: Uint8Array): Uint8Array|null
 	{
 		// S4Err TBC_Encrypt(TBC_ContextRef ctx,
 		//                   const void*    in,
@@ -642,9 +742,12 @@ export class S4 {
 
 		const ptr = this.module._malloc(data_size);
 
-		this.err_code = this.module.ccall(
-			"TBC_Encrypt", "number", ["number", "array", "number"],
-			[context, data, ptr]
+		this.err_code = this.ccall_wrapper(
+			"TBC_Encrypt", "number", [
+				["number", context],
+				["array",  data],
+				["number", ptr]
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -657,7 +760,7 @@ export class S4 {
 		return result;
 	}
 
-	public tbc_decrypt(context: number, data: Uint8Array|Int8Array): Uint8Array|null
+	public tbc_decrypt(context: number, data: Uint8Array): Uint8Array|null
 	{
 		// S4Err TBC_Decrypt(TBC_ContextRef ctx,
 		//                   const void*    in,
@@ -670,9 +773,12 @@ export class S4 {
 
 		const ptr = this.module._malloc(data_size);
 
-		this.err_code = this.module.ccall(
-			"TBC_Decrypt", "number", ["number", "array", "number"],
-			[context, data, ptr]
+		this.err_code = this.ccall_wrapper(
+			"TBC_Decrypt", "number", [
+				["number", context],
+				["array",  data],
+				["number", ptr]
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -689,9 +795,10 @@ export class S4 {
 	{
 		// void TBC_Free(TBC_ContextRef  ctx);
 
-		this.module.ccall(
-			"TBC_Free", null, ["number"],
-			[context]
+		this.ccall_wrapper(
+			"TBC_Free", null, [
+				["number", context],
+			]
 		);
 	}
 
@@ -705,9 +812,10 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
-		this.err_code = this.module.ccall(
-			"ECC_Init", "number", ["number"],
-			[ptr]
+		this.err_code = this.ccall_wrapper(
+			"ECC_Init", "number", [
+				["number", ptr],
+			]
 		);
 
 		let context: number|null = null;
@@ -725,23 +833,28 @@ export class S4 {
 		// S4Err ECC_Generate(ECC_ContextRef ctx,
 		//                    size_t         keysize);
 
-		this.err_code = this.module.ccall(
-			"ECC_Generate", "number", ["number", "number"],
-			[context, keySize]
+		this.err_code = this.ccall_wrapper(
+			"ECC_Generate", "number", [
+				["number", context],
+				["number", keySize]
+			]
 		);
 
 		return this.err_code;
 	}
 
-	public ecc_import(context: number, data: Uint8Array|Int8Array): S4Err
+	public ecc_import(context: number, data: Uint8Array): S4Err
 	{
 		// S4Err ECC_Import(ECC_ContextRef ctx,
 		//                  void*          in,
 		//                  size_t         inlen);
 
-		this.err_code = this.module.ccall(
-			"ECC_Import", "number", ["number", "array", "number"],
-			[context, data, data.byteLength]
+		this.err_code = this.ccall_wrapper(
+			"ECC_Import", "number", [
+				["number", context],
+				["array",  data],
+				["number", data.byteLength],
+			]
 		);
 
 		return this.err_code;
@@ -760,9 +873,14 @@ export class S4 {
 
 		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"ECC_Export", "number", ["number", "number", "array", "number", "number"],
-			[context, includePrivateKey, ptr_buffer, buffer_malloc_size, ptr_size]
+		this.err_code = this.ccall_wrapper(
+			"ECC_Export", "number", [
+				["number",  context],
+				["boolean", includePrivateKey],
+				["number",  ptr_buffer],
+				["number",  buffer_malloc_size],
+				["number",  ptr_size],
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -788,9 +906,10 @@ export class S4 {
 	{
 		// bool ECC_isPrivate(ECC_ContextRef ctx);
 
-		const result = this.module.ccall(
-			"ECC_isPrivate", "number", ["number"],
-			[context]
+		const result = this.ccall_wrapper(
+			"ECC_isPrivate", "number", [
+				["number", context],
+			]
 		);
 
 		return result;
@@ -800,9 +919,10 @@ export class S4 {
 	{
 		// void ECC_Free(ECC_ContextRef ctx);
 
-		this.module.ccall(
-			"ECC_Free", null, ["number"],
-			[context]
+		this.ccall_wrapper(
+			"ECC_Free", null, [
+				["number", context],
+			]
 		);
 	}
 
@@ -810,7 +930,7 @@ export class S4 {
 	 * ----- Key Wrappers -----
 	**/
 
-	public key_deserializeKey(key: Uint8Array|Int8Array): number|null
+	public key_deserializeKey(key: Uint8Array): number|null
 	{
 		// S4Err S4Key_DeserializeKeys(uint8_t*         inData,
 		//                             size_t           inLen,
@@ -818,29 +938,40 @@ export class S4 {
 		//                             S4KeyContextRef* ctxArray[]);
 
 		const ptr_count = this.module._malloc(NUM_BYTES_SIZE_T);
-		const ptr_array = this.module._malloc(NUM_BYTES_POINTER);
+		const ptr_ptr_array = this.module._malloc(NUM_BYTES_POINTER);
 
-		this.err_code = this.module.ccall(
-			"S4Key_DeserializeKeys", "number", ["array", "number", "number", "number", "number"],
-			[key, key.byteLength, ptr_count, ptr_array]
+		this.err_code = this.ccall_wrapper(
+			"S4Key_DeserializeKeys", "number", [
+				["array",  key],
+				["number", key.byteLength],
+				["number", ptr_count],
+				["number", ptr_ptr_array],
+			]
 		);
 
 		let context: number|null = null;
 		if (this.err_code == S4Err.NoErr)
 		{
 			const count = this.module.getValue(ptr_count, "i32");
+			console.log("count: "+ count);
 			if (count > 0)
 			{
-				context = this.module.getValue(ptr_array, "*");	
+				// Doesn't work...
+			//	const ptr_data = this.module.getValue(ptr_ptr_array, "*");
+			//	context = this.module.getValue(ptr_data, "i32");
+
+				context = this.module.getValue(ptr_ptr_array, "i32");
 			}
+
+			// Todo: Do I have to free the array ?
 		}
 
 		this.module._free(ptr_count);
-		this.module._free(ptr_array);
+		this.module._free(ptr_ptr_array);
 		return context;
 	}
 
-	public key_newTBC(algorithm: S4CipherAlgorithm, key: Uint8Array|Int8Array): number|null
+	public key_newTBC(algorithm: S4CipherAlgorithm, key: Uint8Array): number|null
 	{
 		// S4Err S4Key_NewTBC(Cipher_Algorithm algorithm,
 		//                    const void*      key,
@@ -848,9 +979,12 @@ export class S4 {
 
 		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
-		this.err_code = this.module.ccall(
-			"S4Key_NewTBC", "number", ["number", "array", "number"],
-			[algorithm, key, ptr]
+		this.err_code = this.ccall_wrapper(
+			"S4Key_NewTBC", "number", [
+				["number", algorithm],
+				["array",  key],
+				["number", ptr]
+			]
 		);
 
 		let context: number|null = null;
@@ -895,9 +1029,13 @@ export class S4 {
 		const ptr_ptr_data = this.module._malloc(NUM_BYTES_POINTER);
 		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
 
-		this.err_code = this.module.ccall(
-			"S4Key_SerializeToS4Key", "number", ["number", "number", "number", "number"],
-			[context_outer, context_inner, ptr_ptr_data, ptr_size]
+		this.err_code = this.ccall_wrapper(
+			"S4Key_SerializeToS4Key", "number", [
+				["number", context_inner],
+				["number", context_outer],
+				["number", ptr_ptr_data],
+				["number", ptr_size],
+			]
 		);
 
 		let result: Uint8Array|null = null;
@@ -914,6 +1052,80 @@ export class S4 {
 		this.module._free(ptr_ptr_data);
 		this.module._free(ptr_size);
 		return result;
+	}
+
+	public key_getProperty(context: number, property: S4Property): any|null
+	{
+		// S4Err S4Key_GetProperty(S4KeyContextRef    ctx,
+		//                         const char*        propName,
+		//                         S4KeyPropertyType* outPropType,
+		//                         void*              outData,
+		//                         size_t             bufSize,
+		//                         size_t*            datSize);
+
+		const ptr_type = this.module._malloc(NUM_BYTES_POINTER);
+		
+		const buffer_malloc_size = 1024;
+		const ptr_data = this.module._malloc(buffer_malloc_size);
+
+		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
+
+		this.err_code = this.ccall_wrapper(
+			"S4Key_GetProperty", "number", [
+				["number", context],
+				["string", property],
+				["number", ptr_type],
+				["number", ptr_data],
+				["number", buffer_malloc_size],
+				["number", ptr_size]
+			]
+		);
+
+		console.log("this.err_code: "+ this.err_code);
+
+		let result: any|null = null;
+		if (this.err_code == S4Err.NoErr)
+		{
+			const type = this.module.getValue(ptr_type, "i32");
+			switch (type)
+			{
+				case S4PropertyType.UTF8String: {
+					result = this.module.UTF8ToString(ptr_data);
+					break;
+				}
+				case S4PropertyType.Binary: {
+					const size = this.module.getValue(ptr_size, "i32");
+					result = this.util_copyBuffer(ptr_data, size);
+					break;
+				}
+				case S4PropertyType.Numeric: {
+					// What type of number ?
+					// Not enough information...
+					break;
+				}
+				case S4PropertyType.Time: {
+					// Don't know what this means.
+					// Code isn't properly documented.
+					break;
+				}
+			}
+		}
+
+		this.module._free(ptr_type);
+		this.module._free(ptr_data);
+		this.module._free(ptr_size);
+		return result;
+	}
+
+	public key_free(context: number): void
+	{
+		// void S4Key_Free(S4KeyContextRef ctx);
+
+		this.ccall_wrapper(
+			"S4Key_Free", null, [
+				["number", context]
+			]
+		);
 	}
 
 	/**
