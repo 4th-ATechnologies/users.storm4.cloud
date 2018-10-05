@@ -22,11 +22,18 @@ export interface EmscriptenModule {
 		args       : any[]
 	) => any,
 
-	UTF8ToString: (ptr: number)=> string,
+	setValue: (
+		ptr   : number,
+		value : any,
+		type  : LlvmIrType
+	)=> void,
+
 	getValue : (
 		ptr  : number,
 		type : LlvmIrType
 	)=> number,
+
+	UTF8ToString: (ptr: number)=> string,
 }
 
 export interface S4Module extends EmscriptenModule {
@@ -93,17 +100,20 @@ export enum S4HashAlgorithm {
 
 export enum S4CipherAlgorithm
 {
-	AES128         = 1,
-	AES192         = 2,
-	AES256         = 3,
-	"2FISH256"     = 4,
-	TWOFISH256     = 4,
+	AES128        = 1,
+	AES192        = 2,
+	AES256        = 3,
+	"2FISH256"    = 4,
+	TWOFISH256    = 4,
 
-	THREEFISH256      = 100,
-	THREEFISH512      = 102,
-	THREEFISH1024     = 103,
+	"3FISH256"    = 100,
+	THREEFISH256  = 100,
+	"3FISH512"    = 102,
+	THREEFISH512  = 102,
+	"3FISH1024"   = 103,
+	THREEFISH1024 = 103,
 
-	SharedKey      =  200,
+	SharedKey     =  200,
 
 	ECC384        =  300,
 	ECC414        =  301, /*  Dan Bernstein Curve3617  */
@@ -217,7 +227,11 @@ export class S4 {
 	 */
 	public hash_do(algorithm: S4HashAlgorithm, data: Uint8Array|Int8Array): Uint8Array|null
 	{
-		// S4Err HASH_DO(HASH_Algorithm algorithm, const void *in, size_t inlen, size_t outLen, void *out);
+		// S4Err HASH_DO(HASH_Algorithm algorithm,
+		//               const void*    in,
+		//               size_t         inlen,
+		//               size_t         outLen,
+		//               void*          out);
 
 		const num_bytes = Math.ceil(this.hash_getSizeInBits(algorithm) / 8);
 		if (num_bytes == 0) {
@@ -227,8 +241,9 @@ export class S4 {
 		const ptr = this.module._malloc(num_bytes);
 
 		this.err_code = this.module.ccall(
-			"HASH_DO", "number", ["number", "number", "number", "number", "number"],
-			[algorithm, data, data.byteLength, ptr, num_bytes]
+			"HASH_DO", "number",
+			["number", "array", "number", "number", "number"],
+			[algorithm, data, data.byteLength, num_bytes, ptr]
 		);
 
 		let result: Uint8Array|null = null;
@@ -330,7 +345,8 @@ export class S4 {
 
 	public hash_final(context: number): Uint8Array|null
 	{
-		// S4Err HASH_Final(HASH_ContextRef  ctx, void *hashOut);
+		// S4Err HASH_Final(HASH_ContextRef ctx,
+		//                  void*           hashOut);
 
 		const num_bytes = this.hash_getSize(context);
 		if (num_bytes == 0) {
@@ -476,8 +492,99 @@ export class S4 {
 	}
 
 	/**
+	 * ----- Cipher Block Chaining -----
+	**/
+
+	public cbc_encryptPad(
+		options: {
+			algorithm : S4CipherAlgorithm,
+			key       : Uint8Array,
+			iv        : Uint8Array,
+			input     : Uint8Array
+		}
+	): Uint8Array|null
+	{
+		// S4Err CBC_EncryptPAD(Cipher_Algorithm algorithm,
+		//                      uint8_t*         key,
+		//                      const uint8_t*   iv,
+		//                      const uint8_t*   in,
+		//                      size_t           in_len,
+		//                      uint8_t**        outData,
+		//                      size_t*          outSize);
+
+		const {algorithm, key, iv, input} = options;
+
+		const ptr_ptr_data = this.module._malloc(NUM_BYTES_POINTER);
+		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
+
+		this.err_code = this.module.ccall(
+			"CBC_EncryptPAD", "number",
+			["number", "array", "array", "array", "number", "number", "number"],
+			[algorithm, key,     iv,      input, input.byteLength, ptr_ptr_data, ptr_size]
+		);
+
+		let result: Uint8Array|null = null;
+		if (this.err_code == S4Err.NoErr)
+		{
+			const ptr_data = this.module.getValue(ptr_ptr_data, "*");
+			const size = this.module.getValue(ptr_size, "i32");
+
+			result = this.util_copyBuffer(ptr_data, size);
+
+			this.module._free(ptr_data);
+		}
+
+		this.module._free(ptr_ptr_data);
+		this.module._free(ptr_size);
+		return result;
+	}
+
+	public cbc_decryptPad(
+		options: {
+			algorithm: S4CipherAlgorithm,
+			key       : Uint8Array,
+			iv        : Uint8Array,
+			input     : Uint8Array
+		}
+	): Uint8Array|null
+	{
+		// S4Err CBC_DecryptPAD(Cipher_Algorithm algorithm,
+		//                      uint8_t*         key,
+		//                      const uint8_t*   iv,
+		//                      const uint8_t*   in,
+		//                      size_t           in_len,
+		//                      uint8_t**        outData,
+		//                      size_t*          outSize)
+
+		const {algorithm, key, iv, input} = options;
+
+		const ptr_ptr_data = this.module._malloc(NUM_BYTES_POINTER);
+		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
+
+		this.err_code = this.module.ccall(
+			"CBC_DecryptPAD", "number",
+			["number", "array", "array", "array", "number", "number", "number"],
+			[algorithm, key,     iv,      input, input.byteLength, ptr_ptr_data, ptr_size]
+		);
+
+		let result: Uint8Array|null = null;
+		if (this.err_code == S4Err.NoErr)
+		{
+			const ptr_data = this.module.getValue(ptr_ptr_data, "*");
+			const size = this.module.getValue(ptr_size, "i32");
+
+			result = this.util_copyBuffer(ptr_data, size);
+
+			this.module._free(ptr_data);
+		}
+
+		this.module._free(ptr_ptr_data);
+		this.module._free(ptr_size);
+		return result;
+	}
+
+	/**
 	 * ----- Tweakable Block Cipher -----
-	 * 
 	**/
 
 	/**
@@ -489,8 +596,8 @@ export class S4 {
 	public tbc_init(algorithm: S4CipherAlgorithm, key: Uint8Array): number|null
 	{
 		// S4Err TBC_Init(Cipher_Algorithm algorithm,
-		//                const void *key,
-		//                TBC_ContextRef *ctx);
+		//                const void*      key,
+		//                TBC_ContextRef*  ctx);
 
 		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
@@ -512,7 +619,7 @@ export class S4 {
 	public tbc_setTweek(context: number, tweek: Uint8Array): S4Err
 	{
 		// S4Err TBC_SetTweek(TBC_ContextRef ctx,
-		//                    const void *tweek);
+		//                    const void*    tweek);
 
 		this.err_code = this.module.ccall(
 			"TBC_SetTweek", "number", ["number", "array"],
@@ -525,8 +632,8 @@ export class S4 {
 	public tbc_encrypt(context: number, data: Uint8Array|Int8Array): Uint8Array|null
 	{
 		// S4Err TBC_Encrypt(TBC_ContextRef ctx,
-		//                   const void *in,
-		//                   void *out);
+		//                   const void*    in,
+		//                   void*          out);
 		
 		const data_size = data.byteLength;
 
@@ -553,8 +660,8 @@ export class S4 {
 	public tbc_decrypt(context: number, data: Uint8Array|Int8Array): Uint8Array|null
 	{
 		// S4Err TBC_Decrypt(TBC_ContextRef ctx,
-		//                   const void *in,
-		//                   void *out);
+		//                   const void*    in,
+		//                   void*          out);
 
 		const data_size = data.byteLength;
 		
@@ -594,7 +701,7 @@ export class S4 {
 
 	public ecc_init(): number|null
 	{
-		// S4Err ECC_Init(ECC_ContextRef * ctx);
+		// S4Err ECC_Init(ECC_ContextRef* ctx);
 
 		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
@@ -615,7 +722,8 @@ export class S4 {
 
 	public ecc_generate(context: number, keySize: number): S4Err
 	{
-		// S4Err ECC_Generate(ECC_ContextRef ctx, size_t keysize);
+		// S4Err ECC_Generate(ECC_ContextRef ctx,
+		//                    size_t         keysize);
 
 		this.err_code = this.module.ccall(
 			"ECC_Generate", "number", ["number", "number"],
@@ -627,7 +735,9 @@ export class S4 {
 
 	public ecc_import(context: number, data: Uint8Array|Int8Array): S4Err
 	{
-		// S4Err ECC_Import(ECC_ContextRef ctx, void *in, size_t inlen);
+		// S4Err ECC_Import(ECC_ContextRef ctx,
+		//                  void*          in,
+		//                  size_t         inlen);
 
 		this.err_code = this.module.ccall(
 			"ECC_Import", "number", ["number", "array", "number"],
@@ -782,23 +892,26 @@ export class S4 {
 		//                              uint8_t**       outData,
 		//                              size_t*         outSize);
 
-		const ptr_data = this.module._malloc(NUM_BYTES_POINTER);
+		const ptr_ptr_data = this.module._malloc(NUM_BYTES_POINTER);
 		const ptr_size = this.module._malloc(NUM_BYTES_SIZE_T);
 
 		this.err_code = this.module.ccall(
 			"S4Key_SerializeToS4Key", "number", ["number", "number", "number", "number"],
-			[context_outer, context_inner, ptr_data, ptr_size]
+			[context_outer, context_inner, ptr_ptr_data, ptr_size]
 		);
 
 		let result: Uint8Array|null = null;
 		if (this.err_code == S4Err.NoErr)
 		{
+			const ptr_data = this.module.getValue(ptr_ptr_data, "*");
 			const size = this.module.getValue(ptr_size, "i32");
 
 			result = this.util_copyBuffer(ptr_data, size);
+
+			this.module._free(ptr_data);
 		}
 
-		this.module._free(ptr_data);
+		this.module._free(ptr_ptr_data);
 		this.module._free(ptr_size);
 		return result;
 	}

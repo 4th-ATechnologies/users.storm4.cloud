@@ -4,6 +4,7 @@ import * as hasha from 'hasha';
 import * as api_gateway from './APIGateway';
 import * as base32 from '../util/Base32Decode';
 
+import {S4, S4HashAlgorithm, S4CipherAlgorithm} from './S4';
 import {Logger} from '../util/Logging'
 
 import {
@@ -494,4 +495,176 @@ export function concatBuffers(buffers: Array<ArrayBuffer|null|undefined>): Uint8
 	}
 
 	return result;
+}
+
+export function encryptData(
+	options: {
+		s4             : S4,
+		cleartext      : Uint8Array,
+		encryption_key : Uint8Array
+	}
+): Uint8Array|Error
+{
+	const {s4, cleartext, encryption_key} = options;
+
+	let cipher_algorithm: S4CipherAlgorithm|null = null;
+	switch (encryption_key.length)
+	{
+		case 32: cipher_algorithm = S4CipherAlgorithm.AES128;     break;
+		case 64: cipher_algorithm = S4CipherAlgorithm.TWOFISH256; break;
+	}
+
+	if (cipher_algorithm == null)
+	{
+		const err_msg = "Unexpected encryption_key.length: "+ encryption_key.length;
+		log.err(err_msg);
+
+		return new Error(err_msg);
+	}
+
+	const iv = new Uint8Array(
+		encryption_key.buffer,
+		encryption_key.length / 2,
+		encryption_key.length / 2);
+	
+	const encrypted_data = s4.cbc_encryptPad({
+		algorithm : cipher_algorithm,
+		key       : encryption_key,
+		iv        : iv,
+		input     : cleartext
+	});
+
+	if (encrypted_data == null)
+	{
+		const err_msg = s4.err_str() || "Unknown s4 error";
+		log.err(err_msg);
+
+		return new Error(err_msg);
+	}
+
+	const checksum = generateChecksumPrefix(options);
+	if (_.isError(checksum)) {
+		return checksum;
+	}
+
+	const result = concatBuffers([checksum.buffer, encrypted_data.buffer]);
+	return result;
+}
+
+export function decryptData(
+	options: {
+		s4             : S4,
+		ciphertext     : Uint8Array,
+		encryption_key : Uint8Array
+	}
+): Uint8Array|Error
+{
+	const {s4, ciphertext, encryption_key} = options;
+
+	let cipher_algorithm: S4CipherAlgorithm|null = null;
+	switch (encryption_key.length)
+	{
+		case 32: cipher_algorithm = S4CipherAlgorithm.AES128;     break;
+		case 64: cipher_algorithm = S4CipherAlgorithm.TWOFISH256; break;
+	}
+
+	if (cipher_algorithm == null)
+	{
+		const err_msg = "Unexpected encryption_key.length: "+ encryption_key.length;
+		log.err(err_msg);
+
+		return new Error(err_msg);
+	}
+
+	const iv = new Uint8Array(
+		encryption_key.buffer,
+		encryption_key.length / 2,
+		encryption_key.length / 2);
+
+	// The first 4 bytes are part of the hash,
+	// which acts as an error detection system.
+	// 
+	const input = new Uint8Array(ciphertext.buffer, 4);
+
+	const decrypted_data = s4.cbc_decryptPad({
+		algorithm : cipher_algorithm,
+		key       : encryption_key,
+		iv        : iv,
+		input     : input
+	});
+
+	if (decrypted_data == null)
+	{
+		const err_msg = s4.err_str() || "Unknown s4 error";
+		log.err(err_msg);
+
+		return new Error(err_msg);
+	}
+
+	const checksum = generateChecksumPrefix({s4, cleartext: decrypted_data, encryption_key});
+	if (_.isError(checksum)) {
+		return checksum;
+	}
+
+	// No memcmp() ?!?!?
+	// Seriously javascript...
+	// 
+	if (checksum[0] != ciphertext[0] ||
+	    checksum[1] != ciphertext[1] ||
+	    checksum[2] != ciphertext[2] ||
+	    checksum[3] != ciphertext[3]  )
+	{
+		const err_msg = "Corrupt data or incorrect key";
+		log.err(err_msg);
+
+		return new Error(err_msg);
+	}
+
+	return decrypted_data;
+}
+
+function generateChecksumPrefix(
+	options: {
+		s4             : S4,
+		cleartext      : Uint8Array,
+		encryption_key : Uint8Array
+	}
+): Uint8Array|Error
+{
+	const {s4, cleartext, encryption_key} = options;
+
+	// When the recipient goes to decrypt this data,
+	// we need a way to detect if the wrong encryption key was used.
+	// 
+	// So here's what we do:
+	// - We hash the cleartext using a simple hash algorithm.
+	// - Then we XOR the hash with a small portion of the encryption key.
+	// - Then we append this to the front of encrypted data.
+	// 
+	// During decryption we can reverse this process to ensure
+	// that we were able to properly decrypt the data.
+
+	const hash = s4.hash_do(S4HashAlgorithm.xxHash32, cleartext);
+	if (hash == null)
+	{
+		const err_msg = s4.err_str() || "Unknown s4 error";
+		log.err(err_msg);
+
+		return new Error(err_msg);
+	}
+
+	const hash_view = new DataView(hash.buffer);
+	const hash_number = hash_view.getUint32(/*offset:*/0, /*littleEndian:*/true);
+
+	const key_view = new DataView(encryption_key.buffer);
+	const key_number = key_view.getUint32(/*offset:*/0, /*littleEndian:*/false); // convert from big endian
+	
+	const checksum = hash_number ^ key_number;
+
+	const checksum_buffer = new ArrayBuffer(4);
+	const checksum_view = new DataView(checksum_buffer);
+
+	checksum_view.setUint32(/*offset:*/0, /*value:*/checksum, /*littleEndian:*/false);
+
+	return new Uint8Array(checksum_buffer);
 }

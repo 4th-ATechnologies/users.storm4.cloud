@@ -29,6 +29,32 @@ interface ModuleLoader extends S4Module {
 declare var onModuleInitialized: any[];
 declare var Module: ModuleLoader;
 
+let global_s4 : S4|null = null;
+
+const wasmReady = ()=> {
+
+	global_s4 = S4.load(Module);
+	if (global_s4 == null)
+	{
+		console.log("Failed loading WASM crypto library !");
+	}
+	else
+	{
+		console.log("WASM crypto library ready");
+	}
+}
+
+if (Module.isRuntimeInitialized) {
+	wasmReady();
+}
+else {
+	console.log("Waiting for WASM crypto library...");
+	onModuleInitialized.push(()=> {
+		wasmReady();
+	});
+}
+
+
 import {Logger} from '../util/Logging'
 
 import {
@@ -85,7 +111,6 @@ import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import HighlightOffIcon from '@material-ui/icons/HighlightOff';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import ReportProblemIcon from '@material-ui/icons/ReportProblem';
-
 
 const log = Logger.Make('debug', 'Send');
 
@@ -526,10 +551,7 @@ interface ISendState {
 	upload_success    : boolean,
 	upload_err_retry  : number|null,
 	upload_err_fatal  : string|null
-	upload_state      : UploadState|null,
-
-	// S4 encryption library
-	s4 : S4|null
+	upload_state      : UploadState|null
 }
 
 function getStartingState(): ISendState {
@@ -568,12 +590,11 @@ function getStartingState(): ISendState {
 		upload_success   : false,
 		upload_err_retry : null,
 		upload_err_fatal : null,
-		upload_state     : null,
-
-		s4: null
+		upload_state     : null
 	};
 	return state;
 }
+
 
 class Send extends React.Component<ISendProps, ISendState> {
 
@@ -1506,7 +1527,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const s4 = this.state.s4!;
+		//	const s4 = this.state.s4!;
 
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
@@ -1529,12 +1550,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const metadata_cleartext_str = JSON.stringify(metadata_obj, null, 0);
 				const metadata_cleartext_data = TextEncoder().encode(metadata_cleartext_str);
 				
-				// 
-				// Todo: encrypt metadata
-				// Need: Threeefish 512 support in JS
-				//
+				const metadata_ciphertext_data =
+				util.encryptData({
+					s4             : global_s4!,
+					cleartext      : metadata_cleartext_data,
+					encryption_key : file_state.encryption_key
+				});
 
-				json.metadata = metadata_cleartext_str;
+				if (_.isError(metadata_ciphertext_data))
+				{
+					_fail(metadata_ciphertext_data.message);
+					return;
+				}
+
+				json.metadata = base64.fromByteArray(metadata_ciphertext_data);
 			}
 			{ // keys
 	
@@ -2596,11 +2625,21 @@ class Send extends React.Component<ISendProps, ISendState> {
 	
 				const data_cleartext_str = JSON.stringify(data_obj, null, 0);
 				const data_cleartext_data = TextEncoder().encode(data_cleartext_str);
-				// 
-				// Todo: encrypt metadata
-				// Need: Threeefish 512 support in JS
-				//
-				json.data = data_cleartext_str;
+
+				const data_ciphertext_data =
+				util.encryptData({
+					s4             : global_s4!,
+					cleartext      : data_cleartext_data,
+					encryption_key : msg_state.encryption_key
+				});
+
+				if (_.isError(data_ciphertext_data))
+				{
+					_fail(data_ciphertext_data.message);
+					return;
+				}
+				
+				json.data = base64.fromByteArray(data_ciphertext_data);
 			}
 			{ // key
 	
@@ -4664,32 +4703,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 	public bootstrap()
 	{
 		this.fetchUserProfile();
-
-		const wasmReady = ()=> {
-
-			const s4 = S4.load(Module);
-			if (s4 == null)
-			{
-				log.err("Failed loading WASM crypto library !");
-			}
-			else
-			{
-				log.debug("WASM crypto library ready");
-				this.setState({
-					s4
-				});
-			}
-		}
-
-		if (Module.isRuntimeInitialized) {
-			wasmReady();
-		}
-		else {
-			log.debug("Waiting for WASM crypto library...");
-			onModuleInitialized.push(()=> {
-				wasmReady();
-			});
-		}
 	}
 }
 
