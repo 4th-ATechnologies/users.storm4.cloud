@@ -42,27 +42,26 @@
 		var onModuleS4Initialized = [];
 		var ModuleS4 = {
 			isRuntimeInitialized: false,
-			onRuntimeInitialized: ()=> {
+			onRuntimeInitialized: function() {
 				console.log("WASM: ModuleS4.onRuntimeInitialized()");
 			//	console.log("WASM: ModuleS4.keys: "+ JSON.stringify(Object.keys(ModuleS4), null, 2));
 				
 				ModuleS4.isRuntimeInitialized = true;
 				try
 				{
-					for (let i = 0; i < onModuleS4Initialized.length; i++)
+					for (var i = 0; i < onModuleS4Initialized.length; i++)
 					{
-						let listener = onModuleS4Initialized[i];
-						listener();
+						onModuleS4Initialized[i]();
 					}
 				}
 				catch (e) {
 					console.error("Exception while attempting to invoke listeners in onModuleS4Initialized array: "+ e);
 				}
 			},
-			print: (text)=> {
+			print: function(text) {
 				console.log("WASM [log]: "+ text);
 			},
-			printErr: (text)=> {
+			printErr: function(text) {
 				console.error("WASM [err]: "+ text);
 			},
 		};
