@@ -33,29 +33,6 @@ declare var Module: ModuleLoader;
 
 let global_s4 : S4|null = null;
 
-const wasmReady = ()=> {
-
-	global_s4 = S4.load(Module);
-	if (global_s4 == null)
-	{
-		console.log("Failed loading WASM crypto library !");
-	}
-	else
-	{
-		console.log("WASM crypto library ready");
-	}
-}
-
-if (Module.isRuntimeInitialized) {
-	wasmReady();
-}
-else {
-	console.log("Waiting for WASM crypto library...");
-	onModuleInitialized.push(()=> {
-		wasmReady();
-	});
-}
-
 const NODE_BLOCK_SIZE = 1024;
 
 import {Logger} from '../util/Logging'
@@ -1310,7 +1287,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 	//	this.runTests();
-		this.uploadNext();
+		this.uploadStart();
 	}
 
 	protected onRetryTimerTick = (): void => {
@@ -1402,6 +1379,39 @@ class Send extends React.Component<ISendProps, ISendState> {
 			public_key    : this.state.public_key!,
 			symmetric_key : file_state.encryption_key
 		});
+	}
+
+	protected uploadStart(): void {
+		log.debug("uploadStart()");
+
+		// Initialize global_s4 variable.
+
+		const wasmReady = ()=> {
+
+			global_s4 = S4.load(Module);
+			if (global_s4 == null)
+			{
+				log.err("Failed loading WASM crypto library !");
+
+				this.uploadFail("Unable to load WASM crypto library !");
+			}
+			else
+			{
+				log.info("WASM crypto library ready");
+
+				this.uploadNext();
+			}
+		}
+		
+		if (Module.isRuntimeInitialized) {
+			wasmReady();
+		}
+		else {
+			log.info("Waiting for WASM crypto library...");
+			onModuleInitialized.push(()=> {
+				wasmReady();
+			});
+		}
 	}
 
 	protected uploadNext(): void {
@@ -2547,7 +2557,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			cleartext_cloudfile_chunk: Uint8Array
 		): void =>
 		{
-			log.debug(`${METHOD_NAME}._fetchCredentials()`);
+			log.debug(`${METHOD_NAME}._encryptChunk()`);
 
 			const s4 = global_s4!;
 
@@ -4593,14 +4603,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</Typography>
 			);
 		}
-		else // we're in some kind of bad state
+		else // waiting for WASM library to load
 		{
 			info_what = (
 				<Typography
 					align="center"
 					variant="subheading"
 					className={classes.uploadInfo_text}
-				>&nbsp;</Typography>
+				>
+					Initializing crypto library...
+				</Typography>
 			);
 		}
 

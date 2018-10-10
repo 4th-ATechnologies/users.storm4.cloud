@@ -1,5 +1,20 @@
 'use strict';
 
+/**
+ * Returns the proper stage for the runtime environment.
+ * This is controlled via the `.env` file in the root folder.
+ * 
+ * Note:
+ * The following scripts automatically symlink the `.env` file:
+ * - scripts/prebuild.js : `.env` -> `.env.prod`
+ * - scripts/prestart.js : `.env` -> `.env.dev`
+ * 
+ * The following stages are supported:
+ * 
+ * - Dev  : Only used by 4th-A server developers. Changes daily. Highly unstable.
+ * - Test : Used by 4th-A client developers. Used to test server changes. Possibly buggy.
+ * - Prod : Should be used by non 4th-A engineers.
+**/
 export function getStage(): string
 {
 	let stage = process.env.REACT_APP_STAGE;
@@ -10,6 +25,14 @@ export function getStage(): string
 	return stage;
 }
 
+/**
+ * Maps from region & stage to proper AWS API Gateway ID.
+ * 
+ * The `region` parameter is required because it depends on who you're sending files to.
+ * That is, some users have their bucket in 'us-west-2' (Oregon),
+ * while other users have their bucket in 'eu-west-1' (Ireland).
+ * You need to supply the proper region for the target user.
+**/
 export function getAPIGatewayID(region: string): string
 {
 	switch (region)
@@ -39,6 +62,14 @@ export function getAPIGatewayID(region: string): string
 	}
 }
 
+/**
+ * Returns the proper hostname for the given region.
+ * 
+ * The `region` parameter is required because it depends on who you're sending files to.
+ * That is, some users have their bucket in 'us-west-2' (Oregon),
+ * while other users have their bucket in 'eu-west-1' (Ireland).
+ * You need to supply the proper region for the target user.
+**/
 export function getHost(region: string): string
 {
 	const prefix = getAPIGatewayID(region);
@@ -54,6 +85,12 @@ export function getHost(region: string): string
 	return (prefix + suffix);
 }
 
+/**
+ * AWS API Gateway paths have the 'stage' embedded as the first component of the path.
+ * For example:
+ * 
+ * - "/foo/bar" => "/prod/foo/bar"
+**/
 export function getPath(path: string): string
 {
 	let prefix = "/"+ getStage();
