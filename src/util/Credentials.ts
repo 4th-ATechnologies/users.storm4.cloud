@@ -6,7 +6,9 @@ import {Credentials as AWSCredentials} from 'aws-sdk';
 import * as apiGateway from './APIGateway';
 import {Logger} from '../util/Logging'
 
-const log = Logger.Make('debug', 'Credentials');
+const log = (process.env.REACT_APP_STAGE == "dev") ?
+	Logger.Make('Credentials', 'debug') :
+	Logger.Make('Credentials', 'info');
 
 interface CredentialsResponse {
 	ResponseMetadata: {

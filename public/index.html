@@ -39,24 +39,24 @@
       To create a production bundle, use `npm run build` or `yarn build`.
 	 -->
 	 <script type="text/javascript">
-		var onModuleInitialized = [];
-		var Module = {
+		var onModuleS4Initialized = [];
+		var ModuleS4 = {
 			isRuntimeInitialized: false,
 			onRuntimeInitialized: ()=> {
-				console.log("WASM: Module.onRuntimeInitialized()");
-			//	console.log("WASM: Module.keys: "+ JSON.stringify(Object.keys(Module), null, 2));
+				console.log("WASM: ModuleS4.onRuntimeInitialized()");
+			//	console.log("WASM: ModuleS4.keys: "+ JSON.stringify(Object.keys(ModuleS4), null, 2));
 				
-				Module.isRuntimeInitialized = true;
+				ModuleS4.isRuntimeInitialized = true;
 				try
 				{
-					for (let i = 0; i < onModuleInitialized.length; i++)
+					for (let i = 0; i < onModuleS4Initialized.length; i++)
 					{
-						let listener = onModuleInitialized[i];
+						let listener = onModuleS4Initialized[i];
 						listener();
 					}
 				}
 				catch (e) {
-					console.error("Exception while attempting to invoke listeners in Module.onModuleInitialized array: "+ e);
+					console.error("Exception while attempting to invoke listeners in onModuleS4Initialized array: "+ e);
 				}
 			},
 			print: (text)=> {

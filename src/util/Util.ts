@@ -22,8 +22,9 @@ import {
 	Auth0Identity
 } from '../models/models'
 
-const log = Logger.Make('debug', 'Util');
-
+const log = (process.env.REACT_APP_STAGE == "dev") ?
+	Logger.Make('Util', 'debug') :
+	Logger.Make('Util', 'info');
 
 export function buffer2Hex(
 	buffer: ArrayBuffer
@@ -686,16 +687,11 @@ export function wrapSymmetricKey(
 {
 	const {s4, public_key, symmetric_key} = options;
 
-	log.debug("========== < wrapSymmetricKey() > ==========")
-
 	let context_key: number|null = null;
 	let context_tbc: number|null = null;
 
 	const pubKey_str = JSON.stringify(public_key, null, 0);
 	const pubKey_data = TextEncoder().encode(pubKey_str);
-
-	log.debug("pubKey_str: "+ pubKey_str);
-	log.debug("pubKey_data: "+ s4.util_hexString(pubKey_data));
 
 	context_key = s4.key_deserializeKey(pubKey_data);
 	if (context_key == null)
@@ -721,7 +717,6 @@ export function wrapSymmetricKey(
 
 		return _cleanup(new Error(err_msg));
 	}
-	log.debug("cipher_algorithm: "+ cipher_algorithm);
 
 	context_tbc = s4.key_newTBC(cipher_algorithm, symmetric_key);
 	if (context_tbc == null)
@@ -731,8 +726,6 @@ export function wrapSymmetricKey(
 
 		return _cleanup(new Error(err_msg));
 	}
-
-	log.debug("symmetric_key: "+ s4.util_hexString(symmetric_key));
 
 	const wrapped = s4.key_wrapToKey(context_key, context_tbc);
 	if (wrapped == null)
@@ -744,7 +737,6 @@ export function wrapSymmetricKey(
 	}
 	else
 	{
-		log.debug("wrapped: "+ s4.util_hexString(wrapped));
 		return _cleanup(wrapped);
 	}
 
@@ -753,7 +745,6 @@ export function wrapSymmetricKey(
 		if (context_key) { s4.key_free(context_key); }
 		if (context_tbc) { s4.key_free(context_tbc); }
 
-		log.debug("========== </ wrapSymmetricKey() > ==========")
 		return result;
 	}
 }

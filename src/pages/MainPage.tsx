@@ -21,7 +21,9 @@ import {
 	WithStyles 
 } from '@material-ui/core/styles';
 
-const log = Logger.Make('debug', 'Main');
+const log = (process.env.REACT_APP_STAGE == "dev") ?
+	Logger.Make('Main', 'debug') :
+	Logger.Make('Main', 'info');
 
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {

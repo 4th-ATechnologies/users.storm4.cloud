@@ -10,12 +10,12 @@ export class Logger
 	private levels: LogLevelFlags;
 	private filename: string;
 
-	public static MakeWithLevels(levels: LogLevelFlags, filename: string)
+	public static MakeWithLevels(filename: string, levels: LogLevelFlags)
 	{
 		return new Logger(levels, filename);
 	}
 
-	public static Make(level: 'none'|'err'|'warn'|'info'|'debug', filename: string)
+	public static Make(filename: string, level: 'none'|'err'|'warn'|'info'|'debug')
 	{
 		const levels: LogLevelFlags = {
 			err   : level == 'debug' || level == 'info' || level == 'warn' || level == 'err',

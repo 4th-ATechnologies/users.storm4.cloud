@@ -28,12 +28,10 @@ interface ModuleLoader extends S4Module {
 	isRuntimeInitialized: boolean
 }
 
-declare var onModuleInitialized: any[];
-declare var Module: ModuleLoader;
+declare var onModuleS4Initialized: any[];
+declare var ModuleS4: ModuleLoader;
 
 let global_s4 : S4|null = null;
-
-const NODE_BLOCK_SIZE = 1024;
 
 import {Logger} from '../util/Logging'
 
@@ -92,7 +90,11 @@ import HighlightOffIcon from '@material-ui/icons/HighlightOff';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import ReportProblemIcon from '@material-ui/icons/ReportProblem';
 
-const log = Logger.Make('debug', 'Send');
+const log = (process.env.REACT_APP_STAGE == "dev") ?
+	Logger.Make('Send', 'debug') :
+	Logger.Make('Send', 'info');
+
+const NODE_BLOCK_SIZE = 1024;
 
 const AVATAR_SIZE = 96; // width & height (in pixels)
 const COMMENT_MAX_LENGTH = 200; // this isn't a messaging app
@@ -527,6 +529,7 @@ interface ISendState {
 
 	// Uploading
 	// 
+	is_loading_wasm   : boolean,
 	is_uploading      : boolean,
 	upload_index      : number,
 	upload_success    : boolean,
@@ -566,6 +569,7 @@ function getStartingState(): ISendState {
 		file_list           : [],
 		commentTextFieldStr : "",
 
+		is_loading_wasm  : false,
 		is_uploading     : false,
 		upload_index     : 0,
 		upload_success   : false,
@@ -1386,9 +1390,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		// Initialize global_s4 variable.
 
+		this.setState({
+			is_loading_wasm : true
+		});
+
 		const wasmReady = ()=> {
 
-			global_s4 = S4.load(Module);
+			global_s4 = S4.load(ModuleS4);
 			if (global_s4 == null)
 			{
 				log.err("Failed loading WASM crypto library !");
@@ -1403,12 +1411,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		}
 		
-		if (Module.isRuntimeInitialized) {
+		if (ModuleS4.isRuntimeInitialized) {
 			wasmReady();
 		}
 		else {
 			log.info("Waiting for WASM crypto library...");
-			onModuleInitialized.push(()=> {
+			onModuleS4Initialized.push(()=> {
 				wasmReady();
 			});
 		}
@@ -1495,8 +1503,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		this.setState({
-			is_uploading : true,
-			upload_state : upload_state
+			is_loading_wasm : false,
+			is_uploading    : true,
+			upload_state    : upload_state
 
 		}, ()=> {
 
@@ -4603,16 +4612,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</Typography>
 			);
 		}
-		else // waiting for WASM library to load
+		else // Bad state ?
 		{
 			info_what = (
 				<Typography
 					align="center"
 					variant="subheading"
 					className={classes.uploadInfo_text}
-				>
-					Initializing crypto library...
-				</Typography>
+				>&nbsp;</Typography>
 			);
 		}
 
@@ -4768,9 +4775,31 @@ class Send extends React.Component<ISendProps, ISendState> {
 		);
 	}
 
+	public renderUploadInfo_wasm(): React.ReactNode {
+		const state = this.state;
+		const {classes} = this.props;
+
+		return (
+			<div className={classes.section_uploadInfo}>
+				<div className={classes.uploadInfo_description_container}>
+					<Typography
+						align="center"
+						variant="title"
+						className={classes.uploadInfo_text}
+					>
+						Initializing crypto library...
+					</Typography>
+				</div>
+			</div>
+		);
+	}
+
 	public renderUploadInfo(): React.ReactNode {
 		const {state} = this;
 
+		if (state.is_loading_wasm) {
+			return this.renderUploadInfo_wasm();
+		}
 		if (state.upload_err_fatal) {
 			return this.renderUploadInfo_err_fatal();
 		}
@@ -5024,7 +5053,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const section_expansionPanel1 = this.renderExpansionPanel1();
 			const section_expansionPanel2 = this.renderExpansionPanel2();
 			const section_expansionPanel3 = this.renderExpansionPanel3();
-			const section_selectionOrInfo = state.is_uploading
+			const section_selectionOrInfo = (state.is_uploading || state.is_loading_wasm)
 														 ? this.renderUploadInfo()
 			                                  : this.renderFileSelection();
 			const section_fileList        = this.renderFileList();

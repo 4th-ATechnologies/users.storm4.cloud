@@ -12,7 +12,9 @@ import {
 	UserProfile
 } from '../models/models'
 
-const log = Logger.Make('debug', 'UsersCache');
+const log = (process.env.REACT_APP_STAGE == "dev") ?
+	Logger.Make('UsersCache', 'debug') :
+	Logger.Make('UsersCache', 'info');
 
 const global_cache = new LRU<string, UserProfile>({
 	max    : 1000,

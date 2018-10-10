@@ -54,7 +54,9 @@ import AccountCircleIcon from '@material-ui/icons/AccountCircle';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import SendIcon from '@material-ui/icons/Send';
 
-const log = Logger.Make('debug', 'Search');
+const log = (process.env.REACT_APP_STAGE == "dev") ?
+	Logger.Make('Search', 'debug') :
+	Logger.Make('Search', 'info');
 
 const AVATAR_SIZE = 64;
 
