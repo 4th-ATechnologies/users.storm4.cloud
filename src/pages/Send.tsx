@@ -456,6 +456,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 interface UploadState_Multipart {
 	part_size     : number,
 	num_parts     : number,
+	key           : string|null,
 	upload_id     : string|null
 	current_part  : number,
 	progress: {
@@ -682,13 +683,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	protected getStagingPathForFile(
 		options: {
-			file_state : UploadState_File,
-			ext        : "rcrd"|"data",
-			touch     ?: boolean
+			file_state    : UploadState_File,
+			ext           : "rcrd"|"data",
+			anonymous_id ?: string, // used for multipart_complete
+			touch        ?: boolean
 		}
 	): string
 	{
-		const {file_state, ext, touch} = options;
+		const {file_state, ext, anonymous_id, touch} = options;
+
+		let app_prefix = "com.4th-a.storm4";
+		if (anonymous_id) {
+			app_prefix += `:${anonymous_id}`;
+		}
 
 		let command = "put-if-nonexistent";
 		if (touch == true) {
@@ -698,7 +705,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const filename = file_state.random_filename;
 		const request_id = (ext == "rcrd") ? file_state.request_id_rcrd : file_state.request_id_data;
 
-		return `staging/2/com.4th-a.storm4/${command}/temp/${filename}.${ext}/${request_id}`;
+		return `staging/2/${app_prefix}/${command}/temp/${filename}.${ext}/${request_id}`;
 	}
 
 	protected getStagingPathForMsg(
@@ -1855,6 +1862,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				multipart_state = {
 					part_size,
 					num_parts,
+					key           : null,
 					upload_id     : null,
 					current_part  : 0,
 					progress      : {},
@@ -2315,10 +2323,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _fetchCredentials = (): void => {
 			log.debug(`${METHOD_NAME}._fetchCredentials()`);
 
-			credentials_helper.getCredentials((err, credentials)=> {
+			credentials_helper.getCredentials((err, credentials, anonymous_id)=> {
 
-				if (credentials) {
-					_performRequest({credentials});
+				if (credentials && anonymous_id) {
+					_performRequest({credentials, anonymous_id});
 				}
 				else {
 					log.err("Error fetching anonymous AWS credentials: "+ err);
@@ -2329,21 +2337,22 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performRequest = (
 			state: {
-				credentials: AWSCredentials
+				credentials  : AWSCredentials,
+				anonymous_id : string
 			}
 		): void =>
 		{
 			log.debug(`${METHOD_NAME}._performRequest()`);
 
+			const {anonymous_id} = state;
+
 			const user_profile = this.state.user_profile!;
 
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
-
-			const file = this.state.file_list[upload_index];
 			const file_state = upload_state.files[upload_index];
 
-			const key = this.getStagingPathForFile({file_state, ext: "data"});
+			const key = this.getStagingPathForFile({file_state, anonymous_id, ext: "data"});
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -2368,7 +2377,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				if (upload_id)
 				{
-					_succeed(upload_id);
+					_succeed({key, upload_id});
 				}
 				else
 				{
@@ -2379,7 +2388,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		const _succeed = (
-			upload_id: string
+			state: {
+				key       : string,
+				upload_id : string
+			}
 		): void =>
 		{
 			log.err(`${METHOD_NAME}._succeed()`);
@@ -2391,7 +2403,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const upload_index = next.upload_index;
 				const multipart_state = next.upload_state!.files[upload_index].multipart_state!;
 
-				multipart_state.upload_id = upload_id;
+				multipart_state.key       = state.key;
+				multipart_state.upload_id = state.upload_id;
 
 				return next;
 
@@ -2643,7 +2656,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const file_state = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
 
-			const key = this.getStagingPathForFile({file_state, ext: "data"});
+			// Ensure key cannot change (anonymous_id could potentially change)
+			const key = multipart_state.key!; 
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -2744,7 +2758,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// 
 		// We use our own API to get around this problem.
 
-		const _generateJSON = (): void => {
+		const _generateJSON = (): void =>
+		{
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
@@ -2752,13 +2767,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
-
-			const file = this.state.file_list[upload_index];
-
 			const file_state = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
 
-			const key = this.getStagingPathForFile({file_state, ext: "data"});
+			// Ensure key cannot change (anonymous_id could potentially change)
+			const key = multipart_state.key!; 
 
 			const parts: string[] = [];
 			for (let i = 0; i < multipart_state.num_parts; i++)
@@ -2782,7 +2795,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _fetchCredentials = (
 			state: {
-				json_str : string
+				json_str: string
 			}
 		): void =>
 		{
