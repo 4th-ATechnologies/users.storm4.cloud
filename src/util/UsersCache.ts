@@ -1,5 +1,5 @@
 import * as _ from 'lodash';
-import * as LRU from 'lru-cache';
+import LRU from 'lru-cache';
 
 import * as api_gateway from './APIGateway';
 import * as util from './Util';

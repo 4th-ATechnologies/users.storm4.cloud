@@ -1,5 +1,5 @@
 import * as _ from 'lodash';
-import * as hasha from 'hasha';
+import hasha from 'hasha';
 
 import {TextEncoder} from 'text-encoding-utf-8'
 
