@@ -694,6 +694,8 @@ export class S4 {
 		//                const void*      key,
 		//                TBC_ContextRef*  ctx);
 
+		// TODO: TBC_Init should take keyLenght parameter.
+
 		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
 		this.err_code = this.ccall_wrapper(
@@ -932,42 +934,27 @@ export class S4 {
 
 	public key_deserializeKey(key: Uint8Array): number|null
 	{
-		// S4Err S4Key_DeserializeKeys(uint8_t*         inData,
-		//                             size_t           inLen,
-		//                             size_t*          outCount,
-		//                             S4KeyContextRef* ctxArray[]);
+		// S4Err S4Key_DeserializeKey(uint8_t*         inData,
+		//                            size_t           inLen,
+		//                            S4KeyContextRef* ctxOut);
 
-		const ptr_count = this.module._malloc(NUM_BYTES_SIZE_T);
-		const ptr_ptr_array = this.module._malloc(NUM_BYTES_POINTER);
+		const ptr = this.module._malloc(NUM_BYTES_POINTER);
 
 		this.err_code = this.ccall_wrapper(
-			"S4Key_DeserializeKeys", "number", [
+			"S4Key_DeserializeKey", "number", [
 				["array",  key],
 				["number", key.byteLength],
-				["number", ptr_count],
-				["number", ptr_ptr_array],
+				["number", ptr]
 			]
 		);
 
 		let context: number|null = null;
 		if (this.err_code == S4Err.NoErr)
 		{
-			const count = this.module.getValue(ptr_count, "i32");
-			console.log("count: "+ count);
-			if (count > 0)
-			{
-				// Doesn't work...
-			//	const ptr_data = this.module.getValue(ptr_ptr_array, "*");
-			//	context = this.module.getValue(ptr_data, "i32");
-
-				context = this.module.getValue(ptr_ptr_array, "i32");
-			}
-
-			// Todo: Do I have to free the array ?
+			context = this.module.getValue(ptr, "*");
 		}
 
-		this.module._free(ptr_count);
-		this.module._free(ptr_ptr_array);
+		this.module._free(ptr);
 		return context;
 	}
 
@@ -1081,8 +1068,6 @@ export class S4 {
 			]
 		);
 
-		console.log("this.err_code: "+ this.err_code);
-
 		let result: any|null = null;
 		if (this.err_code == S4Err.NoErr)
 		{
@@ -1109,6 +1094,10 @@ export class S4 {
 					break;
 				}
 			}
+		}
+		else
+		{
+			console.log("S4Key_GetProperty(): this.err_code: "+ this.err_code);
 		}
 
 		this.module._free(ptr_type);

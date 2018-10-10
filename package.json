@@ -19,7 +19,7 @@
     "react-dropzone": "^5.0.1",
     "react-image-fallback": "^8.0.0",
     "react-router-dom": "^4.3.1",
-    "react-scripts-ts": "2.17.0",
+    "react-scripts-ts": "^3.1.0",
     "text-encoding-utf-8": "^1.0.2"
   },
   "scripts": {
@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@types/base64-js": "^1.2.5",
+    "@types/bn.js": "^4.11.2",
     "@types/filesize": "^3.6.0",
     "@types/hasha": "^3.0.0",
     "@types/jest": "^23.3.1",

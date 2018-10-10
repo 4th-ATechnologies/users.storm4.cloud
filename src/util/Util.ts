@@ -427,7 +427,7 @@ export function makeCloudFileHeader(
 		byteLength_thumbnail : number,
 		byteLength_data      : number
 	}
-): ArrayBuffer
+): Uint8Array
 {
 	/**
 	 * typedef struct {
@@ -477,13 +477,13 @@ export function makeCloudFileHeader(
 		data_view.setUint8(offset, 0); offset+=(8/8);
 	}
 
-	return buffer;
+	return new Uint8Array(buffer);
 }
 
 /**
  * Array elements that are null|undefined are ignored.
 **/
-export function concatBuffers(buffers: Array<ArrayBuffer|null|undefined>): Uint8Array
+export function concatBuffers(buffers: Array<Uint8Array|null>): Uint8Array
 {
 	const totalByteLength = buffers.reduce<number>((total, buffer)=> {
 		return total + ((buffer == null) ? 0 : buffer.byteLength);
@@ -496,10 +496,8 @@ export function concatBuffers(buffers: Array<ArrayBuffer|null|undefined>): Uint8
 	{
 		if (buffer != null)
 		{
-			const temp = new Uint8Array(buffer);
-
-			result.set(temp, offset);
-			offset += temp.length;
+			result.set(buffer, offset);
+			offset += buffer.length;
 		}
 	}
 
@@ -556,7 +554,7 @@ export function encryptData(
 		return checksum;
 	}
 
-	const result = concatBuffers([checksum.buffer, encrypted_data.buffer]);
+	const result = concatBuffers([checksum, encrypted_data]);
 	return result;
 }
 
@@ -707,9 +705,6 @@ export function wrapSymmetricKey(
 
 		return _cleanup(new Error(err_msg));
 	}
-
-	const wtf = s4.key_getProperty(context_key, S4Property.KeyData);
-	log.debug("wtf: "+ (wtf ? s4.util_hexString(wtf) : null))
 
 	let cipher_algorithm: S4CipherAlgorithm|null = null;
 	switch (symmetric_key.byteLength * 8)

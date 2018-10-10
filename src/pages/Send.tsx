@@ -1,11 +1,13 @@
 import * as _ from 'lodash';
 import * as aws4 from 'aws4';
-import * as filesize from 'filesize';
 import * as merkle_tree_gen from 'merkle-tree-gen';
 import * as queryString from 'query-string';
 import * as React from 'react';
-import * as S3 from 'aws-sdk/clients/s3';
 import * as base64 from 'base64-js'
+
+import BN from 'bn.js';
+import filesize from 'filesize';
+import S3 from 'aws-sdk/clients/s3';
 
 import Dropzone, {ImageFile} from 'react-dropzone'
 import ReactImageFallback from 'react-image-fallback';
@@ -54,6 +56,7 @@ else {
 	});
 }
 
+const NODE_BLOCK_SIZE = 1024;
 
 import {Logger} from '../util/Logging'
 
@@ -466,7 +469,7 @@ interface UploadState_Multipart {
 interface UploadState_File {
 	encryption_key     : Uint8Array,
 	random_filename    : string,
-	file_preview       : ArrayBuffer|null,
+	file_preview       : Uint8Array|null,
 	has_uploaded_rcrd  : boolean,
 	unipart_progress   : number,
 	multipart_state   ?: UploadState_Multipart,
@@ -1577,8 +1580,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const metadata_cleartext_str = JSON.stringify(metadata_obj, null, 0);
 				const metadata_cleartext_data = TextEncoder().encode(metadata_cleartext_str);
 				
-				const metadata_ciphertext_data =
-				util.encryptData({
+				const metadata_ciphertext_data = util.encryptData({
 					s4             : global_s4!,
 					cleartext      : metadata_cleartext_data,
 					encryption_key : file_state.encryption_key
@@ -1598,20 +1600,23 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 					const key_id = `UID:${this.props.user_id}`;
 	
-					util.wrapSymmetricKey({
+					const wrapped_file_key = util.wrapSymmetricKey({
 						s4            : global_s4!,
 						public_key    : this.state.public_key!,
 						symmetric_key : file_state.encryption_key
 					});
-					// 
-					// Todo: encrypt key
-					// Need: ECC 41417 support in JS
-					//
-					const key_cleartext_b64 = base64.fromByteArray(file_state.encryption_key);
+					
+					if (_.isError(wrapped_file_key))
+					{
+						_fail(wrapped_file_key.message);
+						return;
+					}
+
+					const wrapped_file_key_b64 = base64.fromByteArray(wrapped_file_key);
 		
 					json.keys[key_id] = {
 						perms : "rws",
-						key   : key_cleartext_b64
+						key   : wrapped_file_key_b64
 					};
 				}
 				{ // UID:anonymous
@@ -1751,7 +1756,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			if (file.type.startsWith("image/") == false || file.preview == null)
 			{
-				_determineMultipart(null);
+				_determineMultipart(new Uint8Array(0));
 				return;
 			}
 
@@ -1782,7 +1787,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					
 					if (blob == null)
 					{
-						_determineMultipart(null);
+						_determineMultipart(new Uint8Array(0));
 						return;
 					}
 
@@ -1792,8 +1797,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 						const file_preview = file_stream.result as ArrayBuffer|null;
 
 						// Next step
-						_determineMultipart(file_preview);
+						if (file_preview) {
+							_determineMultipart(new Uint8Array(file_preview));
+						} else {
+							_determineMultipart(new Uint8Array(0));
+						}
 					});
+
 					file_stream.readAsArrayBuffer(blob);
 					
 				}, "image/jpeg", 0.5); // same JPEG quality settings as macOS/iOS
@@ -1802,7 +1812,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		const _determineMultipart = (
-			file_preview: ArrayBuffer|null
+			file_preview: Uint8Array
 		): void =>
 		{
 			const SUB_METHOD_NAME = "_determineMultipart()";
@@ -1868,13 +1878,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				const _file_state = next.upload_state!.files[next.upload_index];
 
-				if (file_preview) {
-					_file_state.file_preview = file_preview;
-				}
-				else {
-					_file_state.file_preview = new ArrayBuffer(0);
-				}
-
+				_file_state.file_preview = file_preview;
 				_file_state.multipart_state = multipart_state || undefined;
 
 				return next;
@@ -1936,21 +1940,165 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const file_stream = new FileReader();
 			file_stream.addEventListener("loadend", ()=>{
 
-				const file_data = file_stream.result as ArrayBuffer|null;
-				if (file_data == null) {
+				const cleartext_file_data = file_stream.result as ArrayBuffer|null;
+				if (cleartext_file_data == null) {
 					_fail(`Unable to read file: ${file.name}`);
 				}
 				else {
-					_fetchCredentials({file_data})
+					_encryptFile(new Uint8Array(cleartext_file_data))
 				}
 			});
 
 			file_stream.readAsArrayBuffer(file);
 		}
 
+		const _encryptFile = (cleartext_file_data : Uint8Array): void =>
+		{
+			log.debug(`${METHOD_NAME}._encryptFileData()`);
+
+			const s4 = global_s4!;
+
+			// First we make a "cloud file", which has the following structure:
+			// 
+			// A cloud file is a wrapper which contains the following parts:
+			// - header
+			// - metadata (optional)
+			// - thumbnail (optional)
+			// - filedata
+			// 
+			// The first 64 bytes is the header.
+			// The header contains the offsets of the various sections (if they exist).
+			// 
+			// After the header, the other sections are packed in.
+			// I.e. appended to header without any spacing/padding between sections.
+
+			const user_profile = this.state.user_profile!;
+
+			const upload_index = this.state.upload_index;
+			const file: ImageFile = this.state.file_list[upload_index];			
+			
+			const upload_state = this.state.upload_state!;
+			const file_state = upload_state.files[upload_index];
+
+			const {file_preview} = file_state;
+
+			const file_header = util.makeCloudFileHeader({
+				byteLength_metadata  : 0,
+				byteLength_thumbnail : (file_preview == null) ? 0 : file_preview.byteLength,
+				byteLength_data      : cleartext_file_data.byteLength
+			});
+
+			const key_length = file_state.encryption_key.length;
+
+			let cloud_file_length = 0;
+			cloud_file_length += file_header.byteLength;
+			cloud_file_length += file_preview ? file_preview.byteLength : 0;
+			cloud_file_length += cleartext_file_data.byteLength;
+
+			let padding_length = key_length - (cloud_file_length % key_length);
+			if (padding_length == 0)
+			{
+				// We always force padding at the end of the file.
+				// This increases security a bit,
+				// and also helps when there's a zero byte file.
+				
+				padding_length = key_length;
+			}
+
+			const padding = new Uint8Array(padding_length);
+			for (let i = 0; i < padding_length; i++) {
+				padding[i] = padding_length;
+			}
+
+			const cleartext_cloud_file_data = util.concatBuffers([
+				file_header,
+				file_preview,
+				cleartext_file_data,
+				padding
+			]);
+
+			cloud_file_length = cleartext_cloud_file_data.length;
+
+			if ((cloud_file_length % key_length) != 0)
+			{
+				log.err("cleartext_cloud_file_data.length is not multiple of key_length !");
+
+				_fail("Internal logic error !");
+				return;
+			}
+
+			let algorithm: S4CipherAlgorithm|null = null;
+			switch (key_length * 8)
+			{
+				case 256  : algorithm = S4CipherAlgorithm.THREEFISH256;  break;
+				case 512  : algorithm = S4CipherAlgorithm.THREEFISH512;  break;
+				case 1024 : algorithm = S4CipherAlgorithm.THREEFISH1024; break;
+			}
+
+			if (algorithm == null)
+			{
+				_fail("Unknown encryption_key length (bits): "+ file_state.encryption_key.length * 8);
+				return;
+			}
+
+			const tbc_context = s4.tbc_init(algorithm, file_state.encryption_key);
+			if (tbc_context == null)
+			{
+				log.err("s4.tbc_init() failed: "+ s4.err_code +": "+ s4.err_str());
+
+				_fail("Unable to initialize encryption context !");
+				return;
+			}
+
+			const encrypted_chunks: Uint8Array[] = [];
+
+			for (let offset = 0; offset < cloud_file_length; offset += key_length)
+			{
+				if (offset == 0 || (offset % NODE_BLOCK_SIZE) == 0)
+				{
+					const tweek = new Uint8Array(16); // uint64_t[2]
+
+					const tweek_uint64: number[] = [];
+					tweek_uint64.push(Math.min(offset / NODE_BLOCK_SIZE));
+					tweek_uint64.push(0);
+
+					let tweek_offset = 0;
+					for (const uint64 of tweek_uint64)
+					{
+						const bn = new BN(uint64);
+						const little_endian_bytes_uint64 = bn.toArray("le", 8);
+
+						tweek.set(little_endian_bytes_uint64, tweek_offset);
+						tweek_offset += little_endian_bytes_uint64.length;
+					}
+
+					s4.tbc_setTweek(tbc_context, tweek);
+				}
+
+				const cleartext_chunk = new Uint8Array(cleartext_cloud_file_data.buffer, offset, key_length);
+				const encrypted_chunk = s4.tbc_encrypt(tbc_context, cleartext_chunk);
+
+				if (encrypted_chunk == null)
+				{
+					s4.tbc_free(tbc_context);
+
+					_fail(`Error encrypting file: ${s4.err_code}: ${s4.err_str()}`);
+					return;
+				}
+
+				encrypted_chunks.push(encrypted_chunk);
+			}
+
+			s4.tbc_free(tbc_context);
+			const encrypted_cloud_file_data = util.concatBuffers(encrypted_chunks);
+
+			// Next step
+			_fetchCredentials({encrypted_cloud_file_data})
+		}
+
 		const _fetchCredentials = (
 			state: {
-				file_data : ArrayBuffer
+				encrypted_cloud_file_data : Uint8Array
 			}
 		): void =>
 		{
@@ -1970,9 +2118,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performUpload = (
 			state: {
-				file_data    : ArrayBuffer,
-				credentials  : AWSCredentials,
-				anonymous_id : string,
+				encrypted_cloud_file_data : Uint8Array,
+				credentials               : AWSCredentials,
+				anonymous_id              : string,
 			}
 		): void =>
 		{
@@ -1982,21 +2130,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const user_profile = this.state.user_profile!;
 
 			const upload_index = this.state.upload_index;
-			const file: ImageFile = this.state.file_list[upload_index];			
-			
 			const upload_state = this.state.upload_state!;
 			const file_state = upload_state.files[upload_index];
-
-			const {file_preview} = file_state;
-			const {file_data} = state;
-
-			const file_header = util.makeCloudFileHeader({
-				byteLength_metadata  : 0,
-				byteLength_thumbnail : (file_preview == null) ? 0 : file_preview.byteLength,
-				byteLength_data      : file_data.byteLength
-			});
-
-			const body = util.concatBuffers([file_header, file_preview, file_data]);
 
 			const key = this.getStagingPathForFile({file_state, ext: "data"});
 			
@@ -2008,7 +2143,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const upload = s3.putObject({
 				Bucket : user_profile.s4.bucket,
 				Key    : key,
-				Body   : body,
+				Body   : state.encrypted_cloud_file_data,
 			});
 
 			upload.on("httpUploadProgress", (progress)=> {
@@ -2039,9 +2174,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _succeed = (
 			state: {
-				file_data    : ArrayBuffer,
-				credentials  : AWSCredentials,
-				anonymous_id : string
+				encrypted_cloud_file_data : Uint8Array,
+				credentials               : AWSCredentials,
+				anonymous_id              : string
 			}
 		): void => {
 			log.debug(`${METHOD_NAME}._succeed()`);
@@ -2284,7 +2419,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					_fail(`Unable to read file: ${file.name}`);
 				}
 				else {
-					_fetchCredentials({file_data})
+					_fetchCredentials({file_data: new Uint8Array(file_data)})
 				}
 			});
 
@@ -2303,7 +2438,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _fetchCredentials = (
 			state: {
-				file_data : ArrayBuffer
+				file_data : Uint8Array
 			}
 		): void =>
 		{
@@ -2323,7 +2458,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const _performUpload = (
 			state: {
-				file_data   : ArrayBuffer,
+				file_data   : Uint8Array,
 				credentials : AWSCredentials
 			}
 		): void =>
@@ -2658,8 +2793,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const data_cleartext_str = JSON.stringify(data_obj, null, 0);
 				const data_cleartext_data = TextEncoder().encode(data_cleartext_str);
 
-				const data_ciphertext_data =
-				util.encryptData({
+				const data_ciphertext_data = util.encryptData({
 					s4             : global_s4!,
 					cleartext      : data_cleartext_data,
 					encryption_key : msg_state.encryption_key
@@ -2677,15 +2811,23 @@ class Send extends React.Component<ISendProps, ISendState> {
 	
 				const key_id = `UID:${this.props.user_id}`;
 	
-				// 
-				// Todo: encrypt key
-				// Need: ECC 41417 support in JS
-				//
-				const key_cleartext_b64 = base64.fromByteArray(msg_state.encryption_key);
+				const wrapped_msg_key = util.wrapSymmetricKey({
+					s4            : global_s4!,
+					public_key    : this.state.public_key!,
+					symmetric_key : msg_state.encryption_key
+				});
+
+				if (_.isError(wrapped_msg_key))
+				{
+					_fail(wrapped_msg_key.message);
+					return;
+				}
+
+				const wrapped_msg_key_b64 = base64.fromByteArray(wrapped_msg_key);
 	
 				json.keys[key_id] = {
 					perms : "rwsRL",
-					key   : key_cleartext_b64
+					key   : wrapped_msg_key_b64
 				};
 			}
 
