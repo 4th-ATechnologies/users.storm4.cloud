@@ -51,7 +51,8 @@
 				{
 					for (var i = 0; i < onModuleS4Initialized.length; i++)
 					{
-						onModuleS4Initialized[i]();
+						var listener = onModuleS4Initialized[i];
+						listener();
 					}
 				}
 				catch (e) {
@@ -63,7 +64,7 @@
 			},
 			printErr: function(text) {
 				console.error("WASM [err]: "+ text);
-			},
+			}
 		};
 	</script>
 	<script async type="text/javascript" src="%PUBLIC_URL%/libS4.js"></script>
