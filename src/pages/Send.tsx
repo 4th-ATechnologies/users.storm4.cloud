@@ -5015,7 +5015,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					color="primary"
 					disabled={is_disabled}
 					onClick={this.onSend}
-				>Send Securely</Button>
+				>Send Files Securely</Button>
 			</div>
 		);
 	}
