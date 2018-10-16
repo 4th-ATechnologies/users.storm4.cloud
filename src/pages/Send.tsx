@@ -3953,6 +3953,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 			);
 		}
 
+		const contract_addr = util.contract_address;
+		const contract_link_code     = `https://etherscan.io/address/${contract_addr}#code`;
+		const contract_link_interact = `https://etherscan.io/address/${contract_addr}#readContract`;
+
 		const rpc_data = JSON.stringify(util.rpcJSON(user_id), null, 0);
 		const rpc_url = util.rpcURL();
 		const rpc_call =
@@ -4004,7 +4008,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					users are immutable, verifiable, auditable & tamper-proof.
 				</Typography>
 				<Typography component="ul" paragraph={true}>
-					<li>Smart contract: <a href="https://etherscan.io/address/0xf8cadbcadbeac3b5192ba29df5007746054102a4#code" className={classes.a_noLinkColor}>deployed code</a></li>
+					<li>Smart contract: <a href={contract_link_code} className={classes.a_noLinkColor}>deployed code</a></li>
 					<li>User ID <span className={classes.gray}>(zBase32)</span>: {user_id}</li>
 					<li>User ID <span className={classes.gray}>(hex)</span>: {user_id_hex}</li>
 					<li>
@@ -4021,7 +4025,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 								getMerkleTreeRoot({user_id_hex}, 0)
 							</li>
 							<li className={classes.sub_ul_li}>
-								<a href="https://etherscan.io/address/0xf8cadbcadbeac3b5192ba29df5007746054102a4#readContract" className={classes.a_noLinkColor} target="_blank">
+								<a href={contract_link_interact} className={classes.a_noLinkColor} target="_blank">
 									try it yourself
 								</a>
 							</li>

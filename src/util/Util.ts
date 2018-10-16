@@ -22,6 +22,13 @@ import {
 	Auth0Identity
 } from '../models/models'
 
+export const contract_address = "0x997715D0eb47A50D7521ed0D2D023624a4333F9A";
+
+export const functionSig_addMerkleTreeRoot = "0x12e36530";
+export const functionSig_getUserInfo       = "0x829a34c6";
+export const functionSig_getMerkleTreeRoot = "0xee94c797";
+export const functionSig_getBlockNumber    = "0x47378145";
+
 const log = (process.env.REACT_APP_STAGE == "dev") ?
 	Logger.Make('Util', 'debug') :
 	Logger.Make('Util', 'info');
@@ -228,7 +235,7 @@ export function rpcJSON(user_id: string): any
 		id      : 1,
 		params  : [
 			{
-				to   : "0xF8CadBCaDBeaC3B5192ba29DF5007746054102a4",
+				to   : contract_address,
 				data : transactionData(user_id)
 			},
 			"latest"
@@ -261,19 +268,19 @@ export function transactionData(user_id: string): string
 {
 	const user_id_hex = stripHexPrefix(userID2Hex(user_id));
 	
-	// Data Layout:
+	// function getMerkleTreeRoot(bytes20 userID)
+	// 
+	// Data layout:
 	//
 	// - First 4 bytes : Function signature
-	// - Next 32 bytes : bytes20 : userID
-	// - Next 32 bytes : uint8   : hashTypeID
+	// - Next 32 bytes : bytes20 (aligned left) : userID
 	// 
 	// Note:
 	// 1 byte == 2 hex characters
 	// 32 bytes == 64 hex chacters
 
-	let tx_data = "0x4326e22b";
+	let tx_data = functionSig_getMerkleTreeRoot;
 	tx_data += _.padEnd(user_id_hex, 64, '0');
-	tx_data += _.padStart('', 64, '0');
 
 	return tx_data;
 }
@@ -293,28 +300,21 @@ export function extractMerkleTreeRoot(response: any): string
 
 	encoded = stripHexPrefix(encoded);
 
-	// The response value is of type `bytes`,
-	// which is a dynamically sized element.
+	// function getMerkleTreeRoot(...) public view returns (bytes32)
+	// 
+	// The response value is of type `bytes32`.
 	//
 	// Data Layout:
-	// - 32 bytes : Offset (of where dynamic value is stored)
-	// - 32 bytes : Length of `bytes`
-	// -  X bytes : Actual value
-	//
-	// This looks goofy and wasteful when there's only a single value,
-	// but makes a little more sense when there's several parameter values being passed.
-	// 
-	// In our case, we passed hashTypeID==0, which is SHA256.
-	// So we know the response will be: 256 bits => 32 bytes.
+	// - 32 bytes : Actual value
 	// 
 	// Remember: 1 byte => 2 hex characters
 
-	if (encoded.length != (64+64+64)) {
+	if (encoded.length != 64) {
 		log.debug('extractMerkleTreeRoot(): response.result.length = '+ encoded.length);
 		return '';
 	}
 	else {
-		return encoded.substring(64+64);
+		return encoded.substring(0, 64);
 	}
 }
 
