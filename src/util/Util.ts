@@ -309,12 +309,19 @@ export function extractMerkleTreeRoot(response: any): string
 	// 
 	// Remember: 1 byte => 2 hex characters
 
-	if (encoded.length != 64) {
+	if (encoded.length != 64)
+	{
 		log.debug('extractMerkleTreeRoot(): response.result.length = '+ encoded.length);
 		return '';
 	}
+
+	const root = encoded.substring(0, 64);
+
+	if (root == _.padEnd('0', 64, '0')) {
+		return '';
+	}
 	else {
-		return encoded.substring(0, 64);
+		return root;
 	}
 }
 
