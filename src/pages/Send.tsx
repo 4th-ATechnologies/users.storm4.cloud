@@ -7,6 +7,7 @@ import * as base64 from 'base64-js'
 
 import BN from 'bn.js';
 import filesize from 'filesize';
+import ReCAPTCHA from "react-google-recaptcha";
 import S3 from 'aws-sdk/clients/s3';
 
 import Dropzone, {ImageFile} from 'react-dropzone'
@@ -1357,6 +1358,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}, ()=> {
 			this.bootstrap();
 		});
+	}
+
+	protected onCaptchaChange = (token: string|null): void => {
+		log.debug(`onCaptchaChange(${token})`);
 	}
 
 	protected runTests(): void {
@@ -5003,6 +5008,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 		);
 	}
 
+	public renderCaptcha(): React.ReactNode {
+		return (
+			<ReCAPTCHA
+    			sitekey="6LcZIXYUAAAAANjOdtwTXbk_SznxkfrvE_oi1AdM"
+				onChange={this.onCaptchaChange}
+				theme="dark"
+			/>
+		);
+	}
+
 	public renderSendButton(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
@@ -5062,6 +5077,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			                                  : this.renderFileSelection();
 			const section_fileList        = this.renderFileList();
 			const section_comment         = this.renderComment();
+			const section_captcha         = this.renderCaptcha();
 			const section_button          = this.renderSendButton();
 			const section_footer          = this.renderFooter();
 
@@ -5076,6 +5092,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					{section_selectionOrInfo}
 					{section_fileList}
 					{section_comment}
+					{section_captcha}
 					{section_button}
 					<Divider className={classes.divider}/>
 					{section_footer}
