@@ -4,7 +4,7 @@ Requires aws-cli tools to be installed properly
 # BUILDING THE PROJECT
 
   $ cd /to/this/directory
-  $ yarn build
+  $ npm run build
 
 # SYNCING FILES TO S3 BUCKET
 
@@ -14,7 +14,7 @@ Requires aws-cli tools to be installed properly
   $ aws s3 sync ./build s3://users.storm4.cloud --exclude ".*" --exclude "*.DS_Store" --dryrun
 
   # usersbeta.storm4.cloud:
-  $ aws s3 sync ./build s3://usersbeta.storm4.cloud --exclude ".*" --exclude "*.DS_Store" --dryrun
+  $ aws s3 sync ./build s3://cloudfront.storm4.cloud/usersbeta --exclude ".*" --exclude "*.DS_Store" --dryrun
   
   Make sure the output looks good.
   Then remove the "--dryrun" option.
@@ -31,4 +31,4 @@ Requires aws-cli tools to be installed properly
   $ aws cloudfront create-invalidation --distribution-id E299Q95ZRIBGHF --paths '/*'
   
   # usersbeta.storm4.cloud:
-  $ aws cloudfront create-invalidation --distribution-id E299Q95ZRIBGHF --paths '/*'
+  $ aws cloudfront create-invalidation --distribution-id E24PEVUOLUW55G --paths '/*'
