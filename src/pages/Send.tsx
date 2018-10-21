@@ -265,6 +265,9 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		marginTop: theme.spacing.unit,
 		marginBottom: theme.spacing.unit
 	},
+	section_comment: {
+		marginBottom: theme.spacing.unit* 4
+	},
 	section_uploadInfo: {
 		marginTop: theme.spacing.unit * 4, // <= should match section_fileSelection
 		width: 350,
@@ -530,13 +533,14 @@ interface ISendState {
 
 	// Uploading
 	// 
-	is_loading_wasm   : boolean,
-	is_uploading      : boolean,
-	upload_index      : number,
-	upload_success    : boolean,
-	upload_err_retry  : number|null,
-	upload_err_fatal  : string|null
-	upload_state      : UploadState|null
+	is_captcha_verified : boolean,
+	is_loading_wasm     : boolean,
+	is_uploading        : boolean,
+	upload_index        : number,
+	upload_success      : boolean,
+	upload_err_retry    : number|null,
+	upload_err_fatal    : string|null
+	upload_state        : UploadState|null
 }
 
 function getStartingState(): ISendState {
@@ -570,13 +574,14 @@ function getStartingState(): ISendState {
 		file_list           : [],
 		commentTextFieldStr : "",
 
-		is_loading_wasm  : false,
-		is_uploading     : false,
-		upload_index     : 0,
-		upload_success   : false,
-		upload_err_retry : null,
-		upload_err_fatal : null,
-		upload_state     : null
+		is_captcha_verified : false,
+		is_loading_wasm     : false,
+		is_uploading        : false,
+		upload_index        : 0,
+		upload_success      : false,
+		upload_err_retry    : null,
+		upload_err_fatal    : null,
+		upload_state        : null
 	};
 	return state;
 }
@@ -1362,6 +1367,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	protected onCaptchaChange = (token: string|null): void => {
 		log.debug(`onCaptchaChange(${token})`);
+
+		this.setState({
+			is_captcha_verified: (token != null)
+		});
 	}
 
 	protected runTests(): void {
@@ -5023,8 +5032,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const {classes} = this.props;
 
 		const is_disabled =
-			state.pubkey_tampering_detected ||
-			state.file_list.length == 0     ||
+			state.pubkey_tampering_detected    ||
+			state.file_list.length == 0        ||
+			state.is_captcha_verified == false ||
 			state.is_uploading;
 
 		return (
