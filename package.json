@@ -48,6 +48,7 @@
 		"@types/react-google-recaptcha": "^0.9.2",
 		"@types/react-router-dom": "^4.3.0",
 		"@types/text-encoding-utf-8": "^1.0.1",
+		"commander": "^2.19.0",
 		"shelljs": "^0.8.2",
 		"typescript": "^3.0.1"
 	},
