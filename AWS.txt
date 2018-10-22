@@ -1,9 +1,18 @@
 How to easily sync your changes to the S3 bucket.
 Requires aws-cli tools to be installed properly
 
+  $ cd /to/this/directory
+
+# CONFIGURING THE PROJECT
+
+  # users.storm4.cloud:
+  $ node scripts/homepage --dst prod
+
+  # usersbeta.storm4.cloud:
+  $ node scripts/homepage --dst beta
+
 # BUILDING THE PROJECT
 
-  $ cd /to/this/directory
   $ npm run build
 
 # SYNCING FILES TO S3 BUCKET
@@ -11,7 +20,7 @@ Requires aws-cli tools to be installed properly
   ### To sync folders:
   
   # users.storm4.cloud:
-  $ aws s3 sync ./build s3://users.storm4.cloud --exclude ".*" --exclude "*.DS_Store" --dryrun
+  $ aws s3 sync ./build s3://cloudfront.storm4.cloud/users --exclude ".*" --exclude "*.DS_Store" --dryrun
 
   # usersbeta.storm4.cloud:
   $ aws s3 sync ./build s3://cloudfront.storm4.cloud/usersbeta --exclude ".*" --exclude "*.DS_Store" --dryrun

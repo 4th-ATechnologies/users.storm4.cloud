@@ -8,7 +8,7 @@ const shell = require('shelljs');
 shell.config.fatal = true;
 
 const stage = "dev"; // <= Change this to: [dev, test, prod]
-console.log(`Configuring environment for: ${stage}...`);
+console.log(`Configuring target AWS stage for: ${stage}...`);
  
 // ln([options,] source, dest)
 // 
