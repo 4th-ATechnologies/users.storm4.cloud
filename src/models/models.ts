@@ -123,7 +123,7 @@ export interface S4Rcrd_Metadata {
 }
 
 export interface S4Rcrd_Data_Message {
-	version      : 1,
+	version      : 2,
 	type         : "ephemeral",
 	message     ?: string,
 	attachments  : S4Rcrd_Data_Attachment[]
