@@ -88,6 +88,7 @@ import CheckCircleIcon from '@material-ui/icons/CheckCircle';
 import DeleteIcon from '@material-ui/icons/Delete';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import HighlightOffIcon from '@material-ui/icons/HighlightOff';
+import HourglassFullIcon from '@material-ui/icons/HourglassFull';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import ReportProblemIcon from '@material-ui/icons/ReportProblem';
 
@@ -475,12 +476,13 @@ interface UploadState_Msg {
 }
 
 interface UploadState {
-	burn_date          : number,
-	done_polling_files : boolean,
-	polling_count      : number,
-	touch_count        : number,
-	files              : UploadState_File[],
-	msg                : UploadState_Msg|null
+	burn_date            : number,
+	done_polling_rcrds   : boolean,
+	done_polling_datas   : boolean,
+	polling_count        : number,
+	touch_count          : number,
+	files                : UploadState_File[],
+	msg                  : UploadState_Msg|null
 }
 
 interface ISendProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
@@ -1440,9 +1442,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 		log.debug("uploadNext()");
 
 		const state = this.state;
-		const {file_list, upload_index} = state;
+		if (state.upload_success)
+		{
+			// Done !
+			return;
+		}
 
-		const file = file_list[upload_index];
+		const {file_list, upload_index} = state;
 
 		const old_upload_state = state.upload_state;
 		let upload_state: UploadState;
@@ -1457,11 +1463,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			upload_state = {
 				burn_date,
-				done_polling_files : false,
-				polling_count      : 0,
-				touch_count        : 0,
-				files              : [],
-				msg                : null
+				done_polling_rcrds   : false,
+				done_polling_datas   : false,
+				polling_count        : 0,
+				touch_count          : 0,
+				files                : [],
+				msg                  : null
 			};
 		}
 
@@ -1471,6 +1478,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// 
 		if (upload_index < file_list.length)
 		{
+			// We need to upload the next rcrd or data file.
+
 			if (upload_index >= upload_state.files.length)
 			{
 				log.debug(`Creating upload_state.files[${upload_index}]`);
@@ -1493,71 +1502,35 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				upload_state.files.push(file_state);
 			}
-		}
-		else if (upload_state.done_polling_files)
-		{
-			if (upload_state.msg == null)
-			{
-				log.debug(`Creating upload_state.msg_state`);
 
-				const encryption_key = util.randomEncryptionKey();
-				const random_filename = util.randomFileName();
+			this.setState({
+				is_loading_wasm : false,
+				is_uploading    : true,
+				upload_state    : upload_state
+	
+			}, ()=> {
 
-				const request_id = util.randomHexString(16);
-
-				const msg_state: UploadState_Msg = {
-					encryption_key,
-					random_filename,
-					request_id,
-					has_uploaded_rcrd: false,
-				};
-
-				upload_state.msg = msg_state;
-			}
-		}
-
-		this.setState({
-			is_loading_wasm : false,
-			is_uploading    : true,
-			upload_state    : upload_state
-
-		}, ()=> {
-
-			let needs_poll = false;
-
-			if (upload_index < file_list.length)
-			{
-				const file_state = upload_state.files[upload_index];
-
-				if ( ! file_state.has_uploaded_rcrd) {
-					this.uploadRcrd();
-				}
-				else {
+				if (upload_state.done_polling_rcrds) {
 					this.uploadFile();
 				}
-			}
-			else if (!upload_state.done_polling_files)
-			{
-				needs_poll = true;
-			}
-			else
-			{
-				const msg_state = upload_state.msg!;
-
-				if ( ! msg_state.has_uploaded_rcrd) {
-					this.uploadMessage({upload_state, msg_state});
-				}
-				else if ( ! state.upload_success)
-				{
-					needs_poll = true;
-				}
 				else {
-					// Upload complete
+					this.uploadRcrd();
 				}
-			}
+			});
+		}
+		else if (!upload_state.done_polling_rcrds ||
+					!upload_state.done_polling_datas ||
+		         (upload_state.msg && upload_state.msg.has_uploaded_rcrd))
+		{
+			// We need to poll for the server's response
 
-			if (needs_poll)
-			{
+			this.setState({
+				is_loading_wasm : false,
+				is_uploading    : true,
+				upload_state    : upload_state
+	
+			}, ()=> {
+
 				// We either need to poll or touch (or give up)
 
 				const polling_count = upload_state.polling_count;
@@ -1581,8 +1554,39 @@ class Send extends React.Component<ISendProps, ISendState> {
 						this.uploadPoll();
 					}
 				}
+			});
+		}
+		else
+		{
+			if (upload_state.msg == null)
+			{
+				log.debug(`Creating upload_state.msg_state`);
+
+				const encryption_key = util.randomEncryptionKey();
+				const random_filename = util.randomFileName();
+
+				const request_id = util.randomHexString(16);
+
+				const msg_state: UploadState_Msg = {
+					encryption_key,
+					random_filename,
+					request_id,
+					has_uploaded_rcrd: false,
+				};
+
+				upload_state.msg = msg_state;
 			}
-		});
+
+			this.setState({
+				is_loading_wasm : false,
+				is_uploading    : true,
+				upload_state    : upload_state
+	
+			}, ()=> {
+
+				this.uploadMessage({upload_state, msg_state: upload_state.msg!});
+			});	
+		}
 	}
 
 	protected uploadRcrd(
@@ -1757,6 +1761,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				_file_state.anonymous_id_rcrd = state.anonymous_id;
 				_file_state.has_uploaded_rcrd = true;
 				
+				next.upload_index++;
 				return next;
 				
 			}, ()=> {
@@ -2247,7 +2252,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 				_file_state.anonymous_id_data = state.anonymous_id;
 
 				next.upload_index++;
-
 				return next;
 
 			}, ()=> {
@@ -3152,21 +3156,30 @@ class Send extends React.Component<ISendProps, ISendState> {
 				requests: []
 			};
 
-			for (const file_state of upload_state.files)
+			if (upload_state.done_polling_rcrds)
 			{
-				if (file_state.eTag_rcrd == null)
+				for (const file_state of upload_state.files)
 				{
-					const anonymous_id = file_state.anonymous_id_rcrd || "";
-					const request_id   = file_state.request_id_rcrd   || "";
+					if (file_state.eTag_data == null)
+					{
+						const anonymous_id = file_state.anonymous_id_data || "";
+						const request_id   = file_state.request_id_data   || "";
 
-					json.requests.push([anonymous_id, request_id])
+						json.requests.push([anonymous_id, request_id])
+					}
 				}
-				if (file_state.eTag_data == null)
+			}
+			else
+			{
+				for (const file_state of upload_state.files)
 				{
-					const anonymous_id = file_state.anonymous_id_data || "";
-					const request_id   = file_state.request_id_data   || "";
+					if (file_state.eTag_rcrd == null)
+					{
+						const anonymous_id = file_state.anonymous_id_rcrd || "";
+						const request_id   = file_state.request_id_rcrd   || "";
 
-					json.requests.push([anonymous_id, request_id])
+						json.requests.push([anonymous_id, request_id])
+					}
 				}
 			}
 
@@ -3328,17 +3341,41 @@ class Send extends React.Component<ISendProps, ISendState> {
 					}
 				}
 
-				for (const file_status of next.upload_state!.files)
+				if (current.upload_state!.done_polling_rcrds)
 				{
-					if ((file_status.eTag_rcrd == null) || (file_status.eTag_data == null))
+					// We're done when all eTag_data values are non-null
+
+					for (const file_status of next.upload_state!.files)
 					{
-						done_polling_files = false;
+						if (file_status.eTag_data == null)
+						{
+							done_polling_files = false;
+						}
 					}
+					next.upload_state!.done_polling_datas = done_polling_files;
+				}
+				else
+				{
+					// We're done when all eTag_rcrd values are non-null
+
+					for (const file_status of next.upload_state!.files)
+					{
+						if (file_status.eTag_rcrd == null)
+						{
+							done_polling_files = false;
+						}
+					}
+					next.upload_state!.done_polling_rcrds = done_polling_files;
+					next.upload_index = 0;
 				}
 
-				next.upload_state!.polling_count++;
-				next.upload_state!.done_polling_files = done_polling_files;
-
+				if (done_polling_files) {
+					next.upload_state!.polling_count = 0;
+				}
+				else {
+					next.upload_state!.polling_count++;
+				}
+				
 				return next;
 
 			}, ()=> {
@@ -3425,7 +3462,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{ // Scoping
 
 			const upload_state = this.state.upload_state!;
-			if (upload_state.done_polling_files) {
+			if (upload_state.done_polling_datas) {
 				_generateJSON_msg();
 			}
 			else {
@@ -3536,7 +3573,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{ // Scoping
 
 			const upload_state = this.state.upload_state!;
-			if (upload_state.done_polling_files)
+			if (upload_state.done_polling_datas)
 			{
 				// We're polling the msg
 
@@ -3551,17 +3588,30 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				let key: string|null = null;
 
-				for (const file_state of upload_state.files)
+				if (upload_state.done_polling_rcrds)
 				{
-					if (file_state.eTag_rcrd == null)
+					// We're looking for the next eTag_data value that's null
+
+					for (const file_state of upload_state.files)
 					{
-						key = this.getStagingPathForFile({file_state, ext:"rcrd", touch:true});
-						break;
+						if (file_state.eTag_data == null)
+						{
+							key = this.getStagingPathForFile({file_state, ext:"data", touch:true});
+							break;
+						}
 					}
-					else if (file_state.eTag_data == null)
+				}
+				else
+				{
+					// We're looking for the next eTag_rcrd value that's null
+
+					for (const file_state of upload_state.files)
 					{
-						key = this.getStagingPathForFile({file_state, ext:"data", touch:true});
-						break;
+						if (file_state.eTag_rcrd == null)
+						{
+							key = this.getStagingPathForFile({file_state, ext:"rcrd", touch:true});
+							break;
+						}
 					}
 				}
 
@@ -4509,18 +4559,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		const msg_state = upload_state ? upload_state.msg : null;
 
-		const step_count = (state.file_list.length * 2) + 3;
-		let step_index = 1 + (state.upload_index * 2);
+		const step_count = (state.file_list.length * 2) + 4; // [poll_rcrds, poll_datas, upload_msg, poll_msg]
+		let step_index = 1 + state.upload_index;
 
-		if (file_state)
-		{
-			if (file_state.has_uploaded_rcrd) {
-				step_index++;
-			}
-		}
 		if (upload_state)
 		{
-			if (upload_state.done_polling_files) {
+			if (upload_state.done_polling_rcrds)
+			{
+				step_index += state.file_list.length; // all rcrd's
+				step_index++;
+			}
+
+			if (upload_state.done_polling_datas)
+			{
 				step_index++;
 			}
 		}
@@ -4543,9 +4594,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		let is_uploading_rcrd = false;
 		let is_uploading_data = false;
-		let is_polling_files = false;
-		let is_uploading_msg = false;
-		let is_polling_msg = false;
+		let is_polling_rcrds  = false;
+		let is_polling_datas  = false;
+		let is_uploading_msg  = false;
+		let is_polling_msg    = false;
 
 		if (state.upload_index < state.file_list.length)
 		{
@@ -4558,8 +4610,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 		else if (upload_state)
 		{
-			if ( ! upload_state.done_polling_files) {
-				is_polling_files = true;
+			if (!upload_state.done_polling_rcrds) {
+				is_polling_rcrds = true;
+			}
+			else if (!upload_state.done_polling_datas) {
+				is_polling_datas = true;
 			}
 			else if (upload_state.msg && ! upload_state.msg.has_uploaded_rcrd) {
 				is_uploading_msg = true;
@@ -4594,7 +4649,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</Typography>
 			);
 		}
-		else if (is_polling_files)
+		else if (is_polling_rcrds)
+		{
+			info_what = (
+				<Typography
+					align="center"
+					variant="subheading"
+					className={classes.uploadInfo_text}
+				>
+					Verifying metadata uploads...
+				</Typography>
+			);
+		}
+		else if (is_polling_datas)
 		{
 			info_what = (
 				<Typography
@@ -4642,7 +4709,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		let info_file: React.ReactNode;
-		if (is_polling_files || is_polling_msg)
+		if (is_polling_rcrds || is_polling_datas || is_polling_msg)
 		{
 			let details_str: string;
 			if (upload_state && upload_state.polling_count >= 4)
@@ -4836,10 +4903,29 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const state = this.state;
 		const {classes} = this.props;
 
-		const file_is_uploaded = (state.upload_index > idx);
-		const file_is_uploading = state.is_uploading && (state.upload_index == idx);
+		const upload_state = state.upload_state;
 
-		if (file_is_uploaded)
+		let is_uploading_rcrd = false;
+		let is_uploading_data = false;
+		let is_uploaded_rcrd  = false;
+		let is_uploaded_data  = false;
+
+		if (state.is_uploading && upload_state)
+		{
+			if (upload_state.done_polling_rcrds)
+			{
+				is_uploading_data = (state.upload_index == idx);
+				is_uploaded_data  = (state.upload_index > idx);
+				is_uploaded_rcrd  = true;
+			}
+			else
+			{
+				is_uploading_rcrd = (state.upload_index == idx);
+				is_uploaded_rcrd  = (state.upload_index > idx);
+			}
+		}
+
+		if (is_uploaded_data)
 		{
 			return (
 				<TableRow key={`${idx}`} className={classes.tableRow}>
@@ -4863,7 +4949,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</TableRow>
 			);	
 		}
-		else if (file_is_uploading)
+		else if (is_uploading_rcrd || is_uploaded_rcrd || is_uploading_data)
 		{
 			const upload_failed = (state.upload_err_retry || state.upload_err_fatal);
 
@@ -4885,7 +4971,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					/>
 				);
 			}
-			else {
+			else if (is_uploading_rcrd || is_uploading_data) {
 				section_status = (
 					<CircularProgress
 						className={classes.tableCell_circularProgress}
@@ -4894,20 +4980,45 @@ class Send extends React.Component<ISendProps, ISendState> {
 					/>
 				);
 			}
+			else {
+				section_status = (
+					<HourglassFullIcon
+						className={classes.tableCell_iconRight}
+					/>
+				);
+			}
+
+			let section_filename: React.ReactNode;
+			if (is_uploading_data)
+			{
+				section_filename = (
+					<div className={classes.tableCell_div_container_fileName}>
+						<Typography className={classes.fileNameWithProgress}>
+							{file.name}
+						</Typography>
+						<LinearProgress
+							className={classes.tableCell_linearProgress}
+							variant="determinate"
+							value={progress}
+						/>
+					</div>
+				);
+			}
+			else
+			{
+				section_filename = (
+					<div className={classes.tableCell_div_container_fileName}>
+						<Typography className={classes.fileNameWithoutProgress}>
+							{file.name}
+						</Typography>
+					</div>
+				);
+			}
 
 			return (
 				<TableRow key={`${idx}`} className={classes.tableRow}>
 					<TableCell padding="none">
-						<div className={classes.tableCell_div_container_fileName}>
-							<Typography className={classes.fileNameWithProgress}>
-								{file.name}
-							</Typography>
-							<LinearProgress
-								className={classes.tableCell_linearProgress}
-								variant="determinate"
-								value={progress}
-							/>
-						</div>
+						{section_filename}
 					</TableCell>
 					<TableCell padding="none" className={classes.tableCell_right}>
 						<div className={classes.tableCell_div_container_buttons}>
