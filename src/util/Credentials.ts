@@ -75,6 +75,10 @@ export function getCredentials(
 			prev_anonymous_id = getAnonymousID(cached_credentials)
 		}
 	}
+	else
+	{
+		log.debug("Cache miss: not cached");
+	}
 
 	pending_callbacks.push(in_callback);
 	if (pending_callbacks.length > 1)

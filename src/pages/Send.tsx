@@ -1592,14 +1592,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadRcrd(
 	): void
 	{
-		const METHOD_NAME = "uploadRcrd()";
+		const METHOD_NAME = `uploadRcrd(${this.state.upload_index})`;
 		log.debug(METHOD_NAME);
 
 		const _generateRcrdData = (): void => {
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
-
-		//	const s4 = this.state.s4!;
 
 			const upload_index = this.state.upload_index;
 			const upload_state = this.state.upload_state!;
@@ -1784,7 +1782,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadFile(
 	): void
 	{
-		const METHOD_NAME = "uploadFile()";
+		const METHOD_NAME = `uploadFile(${this.state.upload_index})`;
 		log.debug(`${METHOD_NAME}`);
 
 		const _readThumbnail = (): void => {
@@ -1970,7 +1968,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadFile_unipart(
 	): void
 	{
-		const METHOD_NAME = "uploadFile_unipart()";
+		const METHOD_NAME = `uploadFile_unipart(${this.state.upload_index})`;
 		log.debug(`${METHOD_NAME}`);
 
 		const _readFile = (): void => {
@@ -2274,7 +2272,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadFile_multipart(
 	): void
 	{
-		const METHOD_NAME = "uploadFile_multipart()";
+		const METHOD_NAME = `uploadFile_multipart(${this.state.upload_index})`;
 		log.debug(`${METHOD_NAME}`);
 
 		const upload_index = this.state.upload_index;
@@ -2354,7 +2352,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadFile_multipart_initialize(
 	): void
 	{
-		const METHOD_NAME = "uploadFile_multipart_initialize()";
+		const METHOD_NAME = `uploadFile_multipart_initialize(${this.state.upload_index})`;
 		log.debug(METHOD_NAME);
 
 		const _fetchCredentials = (): void => {
@@ -2466,7 +2464,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		part_index: number
 	): void
 	{
-		const METHOD_NAME = `uploadFile_multipart_part(${part_index})`;
+		const METHOD_NAME = `uploadFile_multipart_part(${this.state.upload_index}:${part_index})`;
 		log.debug(METHOD_NAME);
 
 		const _readChunk = (): void =>
@@ -2784,7 +2782,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadFile_multipart_complete(
 	): void
 	{
-		const METHOD_NAME = "uploadFile_multipart_complete()";
+		const METHOD_NAME = `uploadFile_multipart_complete(${this.state.upload_index})`;
 		log.debug(METHOD_NAME);
 
 		// We do NOT use the S3 API to complete the multipart upload.
@@ -3267,8 +3265,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			}, state.credentials);
 
-			log.debug(`aws4.sign() => `+ JSON.stringify(options, null, 2));
-
 			fetch(url, options).then((response)=> {
 
 				if (response.status == 200) {
@@ -3366,7 +3362,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 						}
 					}
 					next.upload_state!.done_polling_rcrds = done_polling_files;
-					next.upload_index = 0;
+					if (done_polling_files) {
+						next.upload_index = 0; // ready to upload data files now
+					}
 				}
 
 				if (done_polling_files) {
@@ -3428,7 +3426,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 		): void =>
 		{
 			log.debug(`${METHOD_NAME}._succeed_next()`);
-			log.debug('polling_count: '+ this.state.upload_state!.polling_count);
 
 			if (done_polling)
 			{
@@ -3441,6 +3438,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 			else
 			{
+				log.debug('polling_count: '+ this.state.upload_state!.polling_count);
+
 				const upload_state = this.state.upload_state!;
 				const delay = this.getPollingBackoff(upload_state.polling_count);
 
