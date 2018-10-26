@@ -1763,7 +1763,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// UPLOAD RCRD
 		// Step 3 of 4:
 		// 
-		// Performs the PUT into the recipients "staging" directory.
+		// Perform PUT into "staging" directory of user's bucket.
 		// We are requesting permission to have the server copy the file into the user's inbox.
 		// 
 		// Note:
@@ -2119,7 +2119,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		log.debug(`${METHOD_NAME}`);
 
 		// UPLOAD FILE (UNIPART)
-		// Step 1 of 5:
+		// Step 1 of 6:
 		// 
 		// Read the file into memory.
 		// 
@@ -2152,7 +2152,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		// UPLOAD FILE (UNIPART)
-		// Step 2 of 5:
+		// Step 2 of 6:
 		// 
 		// Convert from the raw file to a "cloud file".
 		// A "cloud file" is a standardized wrapper that contains a header, the file & other optional sections.
@@ -2254,6 +2254,23 @@ class Send extends React.Component<ISendProps, ISendState> {
 			_encryptFile(cleartext_cloudfile_data);
 		}
 
+		// UPLOAD FILE (UNIPART)
+		// Step 3 of 6:
+		// 
+		// Encrypt the file (using Threefish).
+		// 
+		// Note #1:
+		//   We encrypt the entire "*.data" file as a single blob.
+		//   The file must be decrypted in order to read any part of it, including the "cloud file" header.
+		// 
+		// Note #2:
+		//   We're using a tweekable block cipher (TBC) with a set "block size".
+		//   What this means is that we reset the tweek every X bytes (where x == block size).
+		//   We do this to support "range reads".
+		//   That is, clients should be able to read a small portion from the middle of the file
+		//   without needing to download & decrypt the entire file.
+		//   TBC helps us achieve this without sacrificing anything on the crypto side.
+		// 
 		const _encryptFile = (
 			cleartext_cloudfile_data : Uint8Array
 		): void =>
@@ -2343,6 +2360,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 			_fetchCredentials(encrypted_cloudfile_data);
 		}
 
+		// UPLOAD FILE (UNIPART)
+		// Step 4 of 6:
+		// 
+		// Request anonymous AWS credentials from the Storm4 servers.
+		// These credentials are required in order to perform a PUT into the user's bucket.
+		// 
+		// Note:
+		// The user's bucket is readonly except for the "staging" directory.
+		// Files placed into the staging directory are immediately processed by the server as a request.
+		// Rejected requests are immediately deleted.
+		// 
 		const _fetchCredentials = (
 			encrypted_cloudfile_data : Uint8Array
 		): void =>
@@ -2361,6 +2389,21 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD FILE (UNIPART)
+		// Step 5 of 6:
+		// 
+		// Perform PUT into "staging" directory of user's bucket.
+		// We are requesting permission to have the server copy the file into the user's inbox.
+		// 
+		// Note:
+		// The response we receive is the response from S3 (not from the Storm4 server).
+		// So after all RCRD files have been uploaded, we're going to ask the Storm4 server for its
+		// response to our request(s). It might reject us for various reasons:
+		// 
+		// - user doesn't allow anonymous users to send file
+		// - user's inbox is full (user configured limit)
+		// - etc
+		// 
 		const _performUpload = (
 			state: {
 				encrypted_cloudfile_data : Uint8Array,
@@ -2419,6 +2462,15 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		};
 
+		// UPLOAD FILE (UNIPART)
+		// Step 6 of 6:
+		// 
+		// Successfully uploaded "*.rcrd" file to S3,
+		// and received a good 200 response (directly from S3, not from Storm4 servers).
+		// 
+		// Now we need to:
+		// - update react state
+		// - move onto the next task: uploadNext()
 		const _succeed = (
 			state: {
 				encrypted_cloudfile_data : Uint8Array,
@@ -2444,6 +2496,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD FILE (UNIPART)
+		// Step Z: goto FAIL
+		// 
+		// Something bad happened. Bummer.
+		// 
 		const _fail = (upload_err_fatal?: string): void => {
 			log.err(`${METHOD_NAME}._fail()`);
 
