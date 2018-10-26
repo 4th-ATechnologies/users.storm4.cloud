@@ -151,7 +151,7 @@ enum S4PropertyType
 type EmscriptenTuple =
 	["number",  number]     |
 	["string",  string]     |
-	["array",   Uint8Array] |
+	["array",   Uint8Array|Readonly<Uint8Array>] |
 	["boolean", boolean];
 
 export class S4 {
@@ -282,7 +282,10 @@ export class S4 {
 	 * Performs a hash in one step.
 	 * If null is returned, check err_code/err_str property for more information.
 	 */
-	public hash_do(algorithm: S4HashAlgorithm, data: Uint8Array): Uint8Array|null
+	public hash_do(
+		algorithm : S4HashAlgorithm,
+		data      : Readonly<Uint8Array>
+	): Uint8Array|null
 	{
 		// S4Err HASH_DO(HASH_Algorithm algorithm,
 		//               const void*    in,
@@ -400,7 +403,10 @@ export class S4 {
 		return result;
 	}
 
-	public hash_update(context: number, data: Uint8Array): S4Err
+	public hash_update(
+		context : number,
+		data    : Readonly<Uint8Array>
+	): S4Err
 	{
 		// S4Err HASH_Update(HASH_ContextRef ctx, const void *data, size_t dataLength);
 
@@ -581,9 +587,9 @@ export class S4 {
 	public cbc_encryptPad(
 		options: {
 			algorithm : S4CipherAlgorithm,
-			key       : Uint8Array,
-			iv        : Uint8Array,
-			input     : Uint8Array
+			key       : Readonly<Uint8Array>,
+			iv        : Readonly<Uint8Array>,
+			input     : Readonly<Uint8Array>
 		}
 	): Uint8Array|null
 	{
@@ -631,9 +637,9 @@ export class S4 {
 	public cbc_decryptPad(
 		options: {
 			algorithm: S4CipherAlgorithm,
-			key       : Uint8Array,
-			iv        : Uint8Array,
-			input     : Uint8Array
+			key       : Readonly<Uint8Array>,
+			iv        : Readonly<Uint8Array>,
+			input     : Readonly<Uint8Array>
 		}
 	): Uint8Array|null
 	{
@@ -688,7 +694,7 @@ export class S4 {
 	 * The key.byteLength should be appropriate for the given algorithm.
 	 * You can use cipher_getSize(algorithm) to determine the length dynamically.
 	**/
-	public tbc_init(algorithm: S4CipherAlgorithm, key: Uint8Array): number|null
+	public tbc_init(algorithm: S4CipherAlgorithm, key: Readonly<Uint8Array>): number|null
 	{
 		// S4Err TBC_Init(Cipher_Algorithm algorithm,
 		//                const void*      key,
@@ -716,7 +722,10 @@ export class S4 {
 		return context;
 	}
 
-	public tbc_setTweek(context: number, tweek: Uint8Array): S4Err
+	public tbc_setTweek(
+		context : number,
+		tweek   : Readonly<Uint8Array>
+	): S4Err
 	{
 		// S4Err TBC_SetTweek(TBC_ContextRef ctx,
 		//                    const void*    tweek);
@@ -731,7 +740,10 @@ export class S4 {
 		return this.err_code;
 	}
 
-	public tbc_encrypt(context: number, data: Uint8Array): Uint8Array|null
+	public tbc_encrypt(
+		context : number,
+		data    : Readonly<Uint8Array>
+	): Uint8Array|null
 	{
 		// S4Err TBC_Encrypt(TBC_ContextRef ctx,
 		//                   const void*    in,
@@ -762,7 +774,10 @@ export class S4 {
 		return result;
 	}
 
-	public tbc_decrypt(context: number, data: Uint8Array): Uint8Array|null
+	public tbc_decrypt(
+		context : number,
+		data    : Readonly<Uint8Array>
+	): Uint8Array|null
 	{
 		// S4Err TBC_Decrypt(TBC_ContextRef ctx,
 		//                   const void*    in,
@@ -845,7 +860,10 @@ export class S4 {
 		return this.err_code;
 	}
 
-	public ecc_import(context: number, data: Uint8Array): S4Err
+	public ecc_import(
+		context : number,
+		data    : Readonly<Uint8Array>
+	): S4Err
 	{
 		// S4Err ECC_Import(ECC_ContextRef ctx,
 		//                  void*          in,
@@ -932,7 +950,7 @@ export class S4 {
 	 * ----- Key Wrappers -----
 	**/
 
-	public key_deserializeKey(key: Uint8Array): number|null
+	public key_deserializeKey(key: Readonly<Uint8Array>): number|null
 	{
 		// S4Err S4Key_DeserializeKey(uint8_t*         inData,
 		//                            size_t           inLen,
@@ -958,7 +976,10 @@ export class S4 {
 		return context;
 	}
 
-	public key_newTBC(algorithm: S4CipherAlgorithm, key: Uint8Array): number|null
+	public key_newTBC(
+		algorithm : S4CipherAlgorithm,
+		key       : Readonly<Uint8Array>
+	): number|null
 	{
 		// S4Err S4Key_NewTBC(Cipher_Algorithm algorithm,
 		//                    const void*      key,
@@ -1144,7 +1165,7 @@ export class S4 {
 		return result;
 	}
 
-	public util_hexString(buffer: Uint8Array): string
+	public util_hexString(buffer: Readonly<Uint8Array>): string
 	{
 		return Array.prototype.map.call(buffer, (x: number)=> ('00' + x.toString(16)).slice(-2)).join('');
 	}

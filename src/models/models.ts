@@ -1,4 +1,3 @@
-
 import {MerkleTree} from 'merkle-tree-gen';
 
 export interface IdentityProvider {

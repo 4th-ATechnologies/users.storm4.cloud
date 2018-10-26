@@ -494,7 +494,7 @@ interface ISendState {
 
 	// User profile (region, bucket & auth0 identities)
 	// 
-	is_fetching_user_profile : boolean,
+	is_fetching_user_profile  : boolean,
 	user_profile              : UserProfile|null,
 	user_profile_identity_idx : number|null,
 	user_profile_err_msg      : string|null,
@@ -596,8 +596,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected retry_start: number|null = null;
 	protected retry_timer: NodeJS.Timer|null = null;
 
-	protected test_count = 0;
-
 	protected isProbablyMobile(): boolean
 	{
 		const user_agent = navigator.userAgent;
@@ -614,7 +612,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	/**
 	 * Returns the index of the identity that should be displayed.
 	 * That is:
-	 * - state.user_profile.auth0.identitie[THIS_NUMBER_HERE]
+	 * - state.user_profile.auth0.identities[THIS_NUMBER_HERE]
 	 * 
 	 * This is done by checking the various posibilities including:
 	 * - query parameters
@@ -623,12 +621,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 	**/
 	protected getIdentityIdx = (): number => {
 
-		const user_profile = this.state.user_profile;
+		const react_state = this.state as DeepReadonly<ISendState>;
+		const user_profile = react_state.user_profile;
+
 		if (user_profile == null) {
 			return 0;
 		}
 
-		const manually_selected_idx = this.state.user_profile_identity_idx;
+		const manually_selected_idx = react_state.user_profile_identity_idx;
 		if (_.isNumber(manually_selected_idx)) {
 			return manually_selected_idx;
 		}
@@ -664,7 +664,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	protected getCloudPath(
-		file_state: UploadState_File
+		file_state: UploadState_File|DeepReadonly<UploadState_File>
 	): string
 	{
 		return `com.4th-a.storm4/temp/${file_state.random_filename}`;
@@ -672,7 +672,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	protected getStagingPathForFile(
 		options: {
-			file_state    : UploadState_File,
+			file_state    : UploadState_File|DeepReadonly<UploadState_File>,
 			ext           : "rcrd"|"data",
 			anonymous_id ?: string, // used for multipart_complete
 			touch        ?: boolean
@@ -699,7 +699,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	protected getStagingPathForMsg(
 		options: {
-			msg_state  : UploadState_Msg,
+			msg_state  : UploadState_Msg|DeepReadonly<UploadState_Msg>,
 			touch     ?: boolean
 		}
 	): string
@@ -720,7 +720,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected getEncryptedFileSize(
 		options: {
 			file       : ImageFile,
-			file_state : UploadState_File
+			file_state : UploadState_File|DeepReadonly<UploadState_File>
 		}
 	): number
 	{
@@ -739,7 +739,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected getProgress(
 		options: {
 			file       : ImageFile,
-			file_state : UploadState_File
+			file_state : UploadState_File|DeepReadonly<UploadState_File>
 		}
 	): number
 	{
@@ -882,7 +882,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 	public fetchPublicKey = ()=> {
 		log.debug("fetchPublicKey()");
 
-		const user_profile = this.state.user_profile;
+		const react_state = this.state as DeepReadonly<ISendState>;
+		const user_profile = react_state.user_profile;
+
 		if (user_profile == null) {
 			return;
 		}
@@ -923,7 +925,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			}, ()=> {
 
-				if (this.state.public_key && this.state.merkle_tree_file) {
+				// tslint:disable-next-line:no-shadowed-variable
+				const react_state = this.state as DeepReadonly<ISendState>;
+
+				if (react_state.public_key && react_state.merkle_tree_file) {
 					this.verifyPublicKey();
 				}
 			});
@@ -951,7 +956,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 	public fetchBlockchainInfo = (): void => {
 		log.debug("fetchBlockchainInfo()");
 
-		const user_profile = this.state.user_profile;
+		const react_state = this.state as DeepReadonly<ISendState>;
+		const user_profile = react_state.user_profile;
+
 		if (user_profile == null) {
 			return;
 		}
@@ -1030,7 +1037,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 	public fetchMerkleTree = (): void => {
 		log.debug("fetchMerkleTree()");
 
-		const merkle_tree_root = this.state.merkle_tree_root;
+		const react_state = this.state as DeepReadonly<ISendState>;
+		const merkle_tree_root = react_state.merkle_tree_root;
+
 		if (merkle_tree_root == null || merkle_tree_root.length == 0) {
 			return;
 		}
@@ -1072,7 +1081,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			}, ()=> {
 
-				if (this.state.public_key && this.state.merkle_tree_file) {
+				// tslint:disable-next-line:no-shadowed-variable
+				const react_state = this.state as DeepReadonly<ISendState>;
+
+				if (react_state.public_key && react_state.merkle_tree_file) {
 					this.verifyPublicKey();
 				}
 			});
@@ -1093,7 +1105,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected verifyPublicKey = (): void => {
 		log.debug("verifyPublicKey()");
 
-		const merkle_tree_file = this.state.merkle_tree_file;
+		const react_state = this.state as DeepReadonly<ISendState>;
+		const merkle_tree_file = _.cloneDeep(react_state.merkle_tree_file) as MerkleTreeFile;
+
 		if (merkle_tree_file == null) {
 			return;
 		}
@@ -1132,10 +1146,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 				});
 			}
 
-			const user_profile = this.state.user_profile;
+			// tslint:disable-next-line:no-shadowed-variable
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const user_profile = react_state.user_profile;
 			const user_id = user_profile ? user_profile.s4.user_id : "";
 
-			const pubkey = this.state.public_key!;
+			const pubkey = react_state.public_key!;
 
 			const values_idx = merkle_tree_file.lookup[user_id];
 			if (values_idx == null || values_idx < 0 || values_idx >= merkle_tree_file.values.length)
@@ -1206,7 +1223,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		let idh: string|null = null;
 
-		const user_profile = this.state.user_profile;
+		const react_state = this.state as DeepReadonly<ISendState>;
+		const user_profile = react_state.user_profile;
+
 		if (user_profile)
 		{
 			const identities = user_profile.auth0.identities;
@@ -1293,7 +1312,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected onSend = (): void => {
 		log.debug("onSend()");
 
-		if (this.state.is_uploading) {
+		const react_state = this.state as DeepReadonly<ISendState>;
+		if (react_state.is_uploading) {
 			log.debug("Ignoring duplicate click");
 			return;
 		}
@@ -1378,6 +1398,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected runTests(): void {
 		log.debug("runTests()");
 
+		const react_state = this.state as DeepReadonly<ISendState>;
+
 		const encryption_key = util.randomEncryptionKey();
 		const random_filename = util.randomFileName();
 
@@ -1396,7 +1418,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		util.wrapSymmetricKey({
 			s4            : global_s4!,
-			public_key    : this.state.public_key!,
+			public_key    : react_state.public_key! as PubKey,
 			symmetric_key : file_state.encryption_key
 		});
 	}
@@ -1441,21 +1463,21 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected uploadNext(): void {
 		log.debug("uploadNext()");
 
-		const state = this.state;
-		if (state.upload_success)
+		const react_state = this.state as DeepReadonly<ISendState>;
+		if (react_state.upload_success)
 		{
 			// Done !
 			return;
 		}
 
-		const {file_list, upload_index} = state;
+		const {file_list, upload_index} = react_state;
 
-		const old_upload_state = state.upload_state;
+		const old_upload_state = react_state.upload_state;
 		let upload_state: UploadState;
 
 		if (old_upload_state)
 		{
-			upload_state = _.cloneDeep(old_upload_state);
+			upload_state = _.cloneDeep(old_upload_state) as UploadState;
 		}
 		else
 		{
@@ -1599,11 +1621,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
+			const react_state = this.state as DeepReadonly<ISendState>;
 
-			const file = this.state.file_list[upload_index];
-			const file_state = upload_state.files[upload_index];
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
+			const file         = react_state.file_list[upload_index];
 
 			const json: S4Rcrd = {
 				version  : 3,
@@ -1623,7 +1646,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const metadata_ciphertext_data = util.encryptData({
 					s4             : global_s4!,
 					cleartext      : metadata_cleartext_data,
-					encryption_key : file_state.encryption_key
+					encryption_key : file_state.encryption_key as Uint8Array
 				});
 
 				if (_.isError(metadata_ciphertext_data))
@@ -1642,8 +1665,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 	
 					const wrapped_file_key = util.wrapSymmetricKey({
 						s4            : global_s4!,
-						public_key    : this.state.public_key!,
-						symmetric_key : file_state.encryption_key
+						public_key    : react_state.public_key!,
+						symmetric_key : file_state.encryption_key as Uint8Array
 					});
 					
 					if (_.isError(wrapped_file_key))
@@ -1705,11 +1728,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const user_profile = react_state.user_profile!;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
 
 			const key = this.getStagingPathForFile({file_state, ext: "rcrd"});
 
@@ -1789,8 +1814,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_readThumbnail()"
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const upload_index = this.state.upload_index;
-			const file = this.state.file_list[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index = react_state.upload_index;
+			const file         = react_state.file_list[upload_index];
 
 			// file.preview is a blob url.
 			// For example: blob:http://localhost:3000/478850dc-08cf-4929-aa8a-af1890ac0350
@@ -1859,10 +1886,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_determineMultipart()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const upload_index = this.state.upload_index;
-			
-			const file = this.state.file_list[upload_index];
-			const file_state = this.state.upload_state!.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
+			const file         = react_state.file_list[upload_index];
 
 			let multipart_state: UploadState_Multipart|null = null;
 
@@ -1918,10 +1947,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				const next = _.cloneDeep(current) as ISendState;
 
-				const _file_state = next.upload_state!.files[next.upload_index];
+				const upload_state = next.upload_state!;               // tslint:disable-line:no-shadowed-variable
+				const file_state   = upload_state.files[upload_index]; // tslint:disable-line:no-shadowed-variable
 
-				_file_state.file_preview = file_preview;
-				_file_state.multipart_state = multipart_state || undefined;
+				file_state.file_preview = file_preview;
+				file_state.multipart_state = multipart_state || undefined;
 
 				return next;
 
@@ -1940,8 +1970,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_dispatch()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const upload_index = this.state.upload_index;
-			const file_state = this.state.upload_state!.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
 
 			if (file_state.multipart_state) {
 				this.uploadFile_multipart();
@@ -1953,8 +1986,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		{ // Scoping
 
-			const upload_index = this.state.upload_index;
-			const file_state = this.state.upload_state!.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state!.files[upload_index];
 
 			if (file_state.file_preview == null) {
 				_readThumbnail();
@@ -1975,8 +2011,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_readFile()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const upload_index = this.state.upload_index;
-			const file: ImageFile = this.state.file_list[upload_index];			
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index = react_state.upload_index;
+			const file         = react_state.file_list[upload_index];
 
 			const file_stream = new FileReader();
 			file_stream.addEventListener("loadend", ()=>{
@@ -2011,9 +2049,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			// After the header, the other sections are packed in.
 			// I.e. appended to header without any spacing/padding between sections.
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
 
 			const {file_preview} = file_state;
 
@@ -2080,9 +2120,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const s4 = global_s4!;
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
 			
 			const key_length = file_state.encryption_key.length;
 
@@ -2188,11 +2230,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const user_profile = react_state.user_profile!;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
 
 			const key = this.getStagingPathForFile({file_state, ext: "data"});
 			
@@ -2275,10 +2319,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = `uploadFile_multipart(${this.state.upload_index})`;
 		log.debug(`${METHOD_NAME}`);
 
-		const upload_index = this.state.upload_index;
-		const upload_state = this.state.upload_state!;
+		const react_state = this.state as DeepReadonly<ISendState>;
 
-		const file_state = upload_state.files[upload_index];
+		const upload_index    = react_state.upload_index;
+		const upload_state    = react_state.upload_state!;
+		const file_state      = upload_state.files[upload_index];
 		const multipart_state = file_state.multipart_state!;
 
 		if (multipart_state.upload_id == null)
@@ -2381,11 +2426,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const {anonymous_id} = state;
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const user_profile = react_state.user_profile!;
+
+			const upload_index = react_state.upload_index;
+			const upload_state = react_state.upload_state!;
+			const file_state   = upload_state.files[upload_index];
 
 			const key = this.getStagingPathForFile({file_state, anonymous_id, ext: "data"});
 
@@ -2436,7 +2483,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const next = _.cloneDeep(current) as ISendState;
 				
 				const upload_index = next.upload_index;
-				const multipart_state = next.upload_state!.files[upload_index].multipart_state!;
+				const upload_state = next.upload_state!;
+				const file_state = upload_state.files[upload_index];
+				const multipart_state = file_state.multipart_state!;
 
 				multipart_state.key       = state.key;
 				multipart_state.upload_id = state.upload_id;
@@ -2471,10 +2520,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._readChunk()`);
 
-			const upload_index = this.state.upload_index;
-			const file = this.state.file_list[upload_index];
-			const file_state = this.state.upload_state!.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index    = react_state.upload_index;
+			const upload_state    = react_state.upload_state!;
+			const file_state      = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
+
+			const file = react_state.file_list[upload_index];
 
 			const file_stream = new FileReader();
 			file_stream.addEventListener("loadend", ()=>{
@@ -2507,11 +2560,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._preprocessChunk()`);
 
-			const upload_index = this.state.upload_index;
-			const file = this.state.file_list[upload_index];
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index    = react_state.upload_index;
+			const upload_state    = react_state.upload_state!;
+			const file_state      = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
+
+			const file = react_state.file_list[upload_index];
 
 			if (part_index == 0)
 			{
@@ -2586,9 +2642,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const s4 = global_s4!;
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const upload_index    = react_state.upload_index;
+			const upload_state    = react_state.upload_state!;
+			const file_state      = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
 
 			const key_length = file_state.encryption_key.length;
@@ -2684,11 +2742,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const user_profile = react_state.user_profile!;
+
+			const upload_index    = react_state.upload_index;
+			const upload_state    = react_state.upload_state!;
+			const file_state      = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
 
 			// Ensure key cannot change (anonymous_id could potentially change)
@@ -2759,21 +2819,38 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _fail = (upload_err_fatal?: string): void => {
 			log.debug(`${METHOD_NAME}._fail()`);
 
-			const upload_index = this.state.upload_index;
-			const multipart_state = this.state.upload_state!.files[upload_index].multipart_state!;
-
 			// Step-specific failure code
-			multipart_state.progress[part_index] = undefined;
+
+			this.setState((current)=> {
+
+				const next = _.cloneDeep(current) as ISendState;
+
+				const upload_index = next.upload_index;
+				const upload_state = next.upload_state; 
+				const file_state      = upload_state!.files[upload_index];
+				const multipart_state = file_state.multipart_state!;
+
+				multipart_state.progress[part_index] = undefined;
+
+				return next;
+			});
 
 			this.uploadFail(upload_err_fatal);
 		}
 
 		{ // Scoping
 
-			const upload_index = this.state.upload_index;
-			const multipart_state = this.state.upload_state!.files[upload_index].multipart_state!;
+			this.setState((current)=> {
 
-			multipart_state.progress[part_index] = 0;
+				const next = _.cloneDeep(current) as ISendState;
+
+				const upload_index    = next.upload_index;
+				const upload_state    = next.upload_state!;
+				const file_state      = upload_state.files[upload_index];
+				const multipart_state = file_state.multipart_state!;
+
+				multipart_state.progress[part_index] = 0;
+			});
 
 			_readChunk();
 		}
@@ -2798,11 +2875,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
 
-			const upload_index = this.state.upload_index;
-			const upload_state = this.state.upload_state!;
-			const file_state = upload_state.files[upload_index];
+			const user_profile = react_state.user_profile!;
+
+			const upload_index    = react_state.upload_index;
+			const upload_state    = react_state.upload_state!;
+			const file_state      = upload_state.files[upload_index];
 			const multipart_state = file_state.multipart_state!;
 
 			// Ensure key cannot change (anonymous_id could potentially change)
@@ -2859,7 +2938,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const user_profile = react_state.user_profile!;
 
 			const host = api_gateway.getHost(user_profile.s4.region);
 			const path = api_gateway.getPath("/multipartComplete");
@@ -2964,6 +3045,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const _generateRcrdData = (): void => {
 			log.debug(`${METHOD_NAME}._generateRcrdData()`);
 
+			const react_state = this.state as DeepReadonly<ISendState>;
+
 			const json: S4Rcrd = {
 				version  : 3,
 				keys     : {},
@@ -2982,7 +3065,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				for (const file_state of upload_state.files)
 				{
 					const cloudPath = this.getCloudPath(file_state);
-					const filename = this.state.file_list[index].name;
+					const filename  = react_state.file_list[index].name;
 
 					data_obj.attachments.push(make_attachment({
 						cloudPath   : cloudPath,
@@ -3016,7 +3099,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	
 				const wrapped_msg_key = util.wrapSymmetricKey({
 					s4            : global_s4!,
-					public_key    : this.state.public_key!,
+					public_key    : _.clone(react_state.public_key!) as PubKey,
 					symmetric_key : msg_state.encryption_key
 				});
 
@@ -3070,7 +3153,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._performUpload()`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+
+			const user_profile = react_state.user_profile!;
 
 			const key = this.getStagingPathForMsg({msg_state});
 
@@ -3148,7 +3233,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_generateJSON_files()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const upload_state = this.state.upload_state!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+			const upload_state = react_state.upload_state!;
 
 			const json: S4PollRequest = {
 				requests: []
@@ -3196,7 +3282,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_generateJSON_msg()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const upload_state = this.state.upload_state!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+			const upload_state = react_state.upload_state!;
 
 			const json: S4PollRequest = {
 				requests: []
@@ -3247,7 +3334,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+			const user_profile = react_state.user_profile!;
 
 			const host = api_gateway.getHost(user_profile.s4.region);
 			const path = api_gateway.getPath("/poll-request");
@@ -3393,7 +3481,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			log.err(`${METHOD_NAME}._succeed_msg()`);
 
 			const {response} = state;
-			const msg_state = this.state.upload_state!.msg!;
+
+			const react_state = this.state as DeepReadonly<ISendState>;
+			const msg_state = react_state.upload_state!.msg!;
 
 			let done_polling = false;
 
@@ -3427,6 +3517,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		{
 			log.debug(`${METHOD_NAME}._succeed_next()`);
 
+			const react_state = this.state as DeepReadonly<ISendState>;
+
 			if (done_polling)
 			{
 				if (type == "files") {
@@ -3438,9 +3530,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 			else
 			{
-				log.debug('polling_count: '+ this.state.upload_state!.polling_count);
+				log.debug('polling_count: '+ react_state.upload_state!.polling_count);
 
-				const upload_state = this.state.upload_state!;
+				const upload_state = react_state.upload_state!;
 				const delay = this.getPollingBackoff(upload_state.polling_count);
 
 				setTimeout(()=> {
@@ -3460,7 +3552,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		{ // Scoping
 
-			const upload_state = this.state.upload_state!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+			const upload_state = react_state.upload_state!;
+
 			if (upload_state.done_polling_datas) {
 				_generateJSON_msg();
 			}
@@ -3507,7 +3601,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const SUB_METHOD_NAME = "_performUpload()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
 
-			const user_profile = this.state.user_profile!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+			const user_profile = react_state.user_profile!;
 
 			const s3 = new S3({
 				credentials : state.credentials,
@@ -3571,7 +3666,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		{ // Scoping
 
-			const upload_state = this.state.upload_state!;
+			const react_state = this.state as DeepReadonly<ISendState>;
+			const upload_state = react_state.upload_state!;
+
 			if (upload_state.done_polling_datas)
 			{
 				// We're polling the msg
@@ -3656,10 +3753,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderUserProfile(): React.ReactNode|React.ReactFragment {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
-		if (state.is_fetching_user_profile)
+		if (react_state.is_fetching_user_profile)
 		{
 			return (
 				<div className={classes.section_identity}>
@@ -3679,19 +3776,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</div>
 			);
 		}
-		else if (state.user_profile_err_msg)
+		else if (react_state.user_profile_err_msg)
 		{
 			return (
 				<div className={classes.section_identity}>
 					<Typography variant="headline">
-						{state.user_profile_err_msg}
+						{react_state.user_profile_err_msg}
 					</Typography>
 				</div>
 			);
 		}
-		else if (state.user_profile)
+		else if (react_state.user_profile)
 		{
-			const user_profile = state.user_profile;
+			const user_profile = react_state.user_profile;
 			const identities = user_profile.auth0.identities;
 
 			const selected_identityIdx = this.getIdentityIdx();
@@ -3742,8 +3839,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 			const section_menu = (
 				<Menu
-					anchorEl={state.userIdentsMenuAnchor}
-					open={state.userIdentsMenuOpen}
+					anchorEl={react_state.userIdentsMenuAnchor as HTMLElement}
+					open={react_state.userIdentsMenuOpen}
 					onClose={this.userIdentsMenuClosed}
 				>
 				{identities.map((identity, index) => {
@@ -3805,12 +3902,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderExpansionPanel1(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		const user_id = this.props.user_id;
-		const user_profile = state.user_profile;
-		const pub_key = state.public_key;
+		const user_profile = react_state.user_profile;
+		const pub_key = react_state.public_key;
 
 		let displayName = user_id;
 		if (user_profile)
@@ -3829,7 +3926,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		let section_summary: React.ReactNode;
-		if (state.is_fetching_public_key)
+		if (react_state.is_fetching_public_key)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
@@ -3843,13 +3940,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</div>
 			);
 		}
-		else if (state.public_key_err_msg)
+		else if (react_state.public_key_err_msg)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
 					<ReportProblemIcon color="error"/>
 					<Typography className={classes.section_expansionPanel_summary_text}>
-						{state.public_key_err_msg || "Generic error message"}
+						{react_state.public_key_err_msg || "Generic error message"}
 					</Typography>
 				</div>
 			);
@@ -3938,18 +4035,18 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderExpansionPanel2(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		const user_id = this.props.user_id;
-		const user_profile = state.user_profile;
+		const user_profile = react_state.user_profile;
 
 		const user_id_hex = util.userID2Hex(user_id);
 
-		const merkle_tree_root = state.merkle_tree_root;
+		const merkle_tree_root = react_state.merkle_tree_root;
 
 		let section_summary: React.ReactNode;
-		if (state.is_fetching_merkle_tree_root || state.is_fetching_merkle_tree_file)
+		if (react_state.is_fetching_merkle_tree_root || react_state.is_fetching_merkle_tree_file)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
@@ -3958,20 +4055,20 @@ class Send extends React.Component<ISendProps, ISendState> {
 						size={16}
 					/>
 					<Typography className={classes.section_expansionPanel_summary_text}>
-						{state.is_fetching_merkle_tree_root
+						{react_state.is_fetching_merkle_tree_root
 							? "Fetching blockchain verification (1 of 2)..."
 							: "Fetching blockchain verification (2 of 2)..."}
 					</Typography>
 				</div>
 			);
 		}
-		else if (state.merkle_tree_root_err_msg || state.merkle_tree_file_err_msg)
+		else if (react_state.merkle_tree_root_err_msg || react_state.merkle_tree_file_err_msg)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
 					<ReportProblemIcon color="error"/>
 					<Typography className={classes.section_expansionPanel_summary_text}>
-						{state.merkle_tree_root_err_msg || state.merkle_tree_file_err_msg}
+						{react_state.merkle_tree_root_err_msg || react_state.merkle_tree_file_err_msg}
 					</Typography>
 				</div>
 			);
@@ -4135,11 +4232,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderExpansionPanel3(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		const user_id = this.props.user_id;
-		const user_profile = state.user_profile;
+		const user_profile = react_state.user_profile;
 
 		let displayName = user_id;
 		if (user_profile)
@@ -4150,12 +4247,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			displayName = util.displayNameForIdentity(identity, user_profile.s4);
 		}
 
-		const pub_key = state.public_key;
-		const merkle_tree_root = state.merkle_tree_root;
-		const merkle_tree_file = state.merkle_tree_file;
+		const pub_key = react_state.public_key;
+		const merkle_tree_root = react_state.merkle_tree_root;
+		const merkle_tree_file = react_state.merkle_tree_file;
 
 		let section_summary: React.ReactNode;
-		if (state.is_verifying_public_key)
+		if (react_state.is_verifying_public_key)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
@@ -4169,7 +4266,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</div>
 			);
 		}
-		else if (state.pubkey_tampering_detected)
+		else if (react_state.pubkey_tampering_detected)
 		{
 			section_summary = (
 				<div className={classes.section_expansionPanel_summary}>
@@ -4180,9 +4277,9 @@ class Send extends React.Component<ISendProps, ISendState> {
 				</div>
 			);
 		}
-		else if (_.isBoolean(state.pubkey_verifcation_success))
+		else if (_.isBoolean(react_state.pubkey_verifcation_success))
 		{
-			if (state.pubkey_verifcation_success == false)
+			if (react_state.pubkey_verifcation_success == false)
 			{
 				section_summary = (
 					<div className={classes.section_expansionPanel_summary}>
@@ -4221,14 +4318,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 
 		let section_details: React.ReactNode;
-		if (state.is_verifying_public_key || state.pubkey_tampering_detected)
+		if (react_state.is_verifying_public_key || react_state.pubkey_tampering_detected)
 		{
 			section_details = (
 				<div className={classes.section_expansionPanel_details}>
 				</div>
 			);
 		}
-		else if (state.pubkey_verifcation_success == false)
+		else if (react_state.pubkey_verifcation_success == false)
 		{
 			section_details = (
 				<div className={classes.section_expansionPanel_details}>
@@ -4329,7 +4426,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 							Calculated Merkle Tree Root:
 							<ul className={classes.sub_ul}>
 								<li className={classes.sub_ul_li}>
-									{state.calculated_merkle_tree_root || ""}
+									{react_state.calculated_merkle_tree_root || ""}
 								</li>
 							</ul>
 						</li>
@@ -4361,7 +4458,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderFileSelection(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		const isMobile = this.isProbablyMobile();
@@ -4416,7 +4513,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			<div className={classes.section_fileSelection}>
 				<Dropzone
 					onDrop={this.onDrop}
-					disabled={this.state.pubkey_tampering_detected || false}
+					disabled={react_state.pubkey_tampering_detected || false}
 				>
 					{description}
 				</Dropzone>
@@ -4425,10 +4522,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderUploadInfo_err_fatal(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
-		const fatal_msg = state.upload_err_fatal || "";
+		const fatal_msg = react_state.upload_err_fatal || "";
 
 		return (
 			<div className={classes.section_uploadInfo}>
@@ -4459,10 +4556,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderUploadInfo_err_retry(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
-		const remaining = state.upload_err_retry || 0;
+		const remaining = react_state.upload_err_retry || 0;
 
 		let text: string;
 		if (remaining == 1) {
@@ -4508,10 +4605,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderUploadInfo_success(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
-		const upload_state = state.upload_state!;
+		const upload_state = react_state.upload_state!;
 
 		let success_msg: string;
 		if (upload_state.files.length <= 1) {
@@ -4545,27 +4642,27 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderUploadInfo_progress(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
-		const upload_state = state.upload_state;
-		const upload_index = state.upload_index;
+		const upload_state = react_state.upload_state;
+		const upload_index = react_state.upload_index;
 
-		let file_state: UploadState_File|null = null;
+		let file_state: DeepReadonly<UploadState_File>|null = null;
 		if (upload_state && upload_state.files.length > upload_index) {
 			file_state = upload_state.files[upload_index];
 		}
 
 		const msg_state = upload_state ? upload_state.msg : null;
 
-		const step_count = (state.file_list.length * 2) + 4; // [poll_rcrds, poll_datas, upload_msg, poll_msg]
-		let step_index = 1 + state.upload_index;
+		const step_count = (react_state.file_list.length * 2) + 4; // [poll_rcrds, poll_datas, upload_msg, poll_msg]
+		let step_index = 1 + react_state.upload_index;
 
 		if (upload_state)
 		{
 			if (upload_state.done_polling_rcrds)
 			{
-				step_index += state.file_list.length; // all rcrd's
+				step_index += react_state.file_list.length; // all rcrd's
 				step_index++;
 			}
 
@@ -4598,7 +4695,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		let is_uploading_msg  = false;
 		let is_polling_msg    = false;
 
-		if (state.upload_index < state.file_list.length)
+		if (react_state.upload_index < react_state.file_list.length)
 		{
 			if (file_state && file_state.has_uploaded_rcrd) {
 				is_uploading_data = true;
@@ -4734,7 +4831,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			let percent = "0";
 			if (file_state)
 			{
-				const file = this.state.file_list[upload_index];
+				const file = react_state.file_list[upload_index];
 				const progress = this.getProgress({file, file_state});
 
 				percent = Math.floor(progress * 100).toString();
@@ -4860,7 +4957,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderUploadInfo_wasm(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		return (
@@ -4899,28 +4996,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderFileRow(file: ImageFile, idx: number): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
-		const upload_state = state.upload_state;
+		const upload_state = react_state.upload_state;
 
 		let is_uploading_rcrd = false;
 		let is_uploading_data = false;
 		let is_uploaded_rcrd  = false;
 		let is_uploaded_data  = false;
 
-		if (state.is_uploading && upload_state)
+		if (react_state.is_uploading && upload_state)
 		{
 			if (upload_state.done_polling_rcrds)
 			{
-				is_uploading_data = (state.upload_index == idx);
-				is_uploaded_data  = (state.upload_index > idx);
+				is_uploading_data = (react_state.upload_index == idx);
+				is_uploaded_data  = (react_state.upload_index > idx);
 				is_uploaded_rcrd  = true;
 			}
 			else
 			{
-				is_uploading_rcrd = (state.upload_index == idx);
-				is_uploaded_rcrd  = (state.upload_index > idx);
+				is_uploading_rcrd = (react_state.upload_index == idx);
+				is_uploaded_rcrd  = (react_state.upload_index > idx);
 			}
 		}
 
@@ -4950,13 +5047,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 		else if (is_uploading_rcrd || is_uploaded_rcrd || is_uploading_data)
 		{
-			const upload_failed = (state.upload_err_retry || state.upload_err_fatal);
+			const upload_failed = (react_state.upload_err_retry || react_state.upload_err_fatal);
 
 			// We're going to display the progress, even if the upload has failed.
 			// In the case of multipart, this makes sense as the upload is resumable.
 			// 
 			let progress = 0;
-			const file_state = state.upload_state!.files[idx];
+			const file_state = react_state.upload_state!.files[idx];
 			if (file_state) {
 				progress = this.getProgress({file, file_state}) * 100;
 			}
@@ -5061,10 +5158,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderFileList(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
-		const file_list = state.file_list;
+		const file_list = react_state.file_list;
 
 		// It actually looks better with the rendered empty table.
 		// I prefer the extra whitespace below the dropzone.
@@ -5089,14 +5186,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderComment(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		const is_disabled =
-			state.pubkey_tampering_detected ||
-			state.is_uploading;
+			react_state.pubkey_tampering_detected ||
+			react_state.is_uploading;
 
-		const chars_remaining = COMMENT_MAX_LENGTH - state.commentTextFieldStr.length;
+		const chars_remaining = COMMENT_MAX_LENGTH - react_state.commentTextFieldStr.length;
 		let chars_remaining_str: string;
 		if (chars_remaining < 0) {
 			chars_remaining_str = `Comment will be truncated! ${chars_remaining} characters left`;
@@ -5138,14 +5235,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderSendButton(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		const is_disabled =
-			state.pubkey_tampering_detected    ||
-			state.file_list.length == 0        ||
-			state.is_captcha_verified == false ||
-			state.is_uploading;
+			react_state.pubkey_tampering_detected    ||
+			react_state.file_list.length == 0        ||
+			react_state.is_captcha_verified == false ||
+			react_state.is_uploading;
 
 		return (
 			<div className={classes.section_sendButton}>
@@ -5160,7 +5257,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 
 	public renderFooter(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		return (
@@ -5174,12 +5271,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 	}
 	
 	public render(): React.ReactNode {
-		const state = this.state;
+		const react_state = this.state as DeepReadonly<ISendState>;
 		const {classes} = this.props;
 
 		const section_userProfile = this.renderUserProfile();
 
-		if (state.user_profile == null)
+		if (react_state.user_profile == null)
 		{
 			return (
 				<div className={classes.root}>
@@ -5192,7 +5289,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const section_expansionPanel1 = this.renderExpansionPanel1();
 			const section_expansionPanel2 = this.renderExpansionPanel2();
 			const section_expansionPanel3 = this.renderExpansionPanel3();
-			const section_selectionOrInfo = (state.is_uploading || state.is_loading_wasm)
+			const section_selectionOrInfo = (react_state.is_uploading || react_state.is_loading_wasm)
 														 ? this.renderUploadInfo()
 			                                  : this.renderFileSelection();
 			const section_fileList        = this.renderFileList();

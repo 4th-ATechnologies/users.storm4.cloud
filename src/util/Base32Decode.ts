@@ -1,5 +1,5 @@
 /**
- * Modified from: 
+ * Modified from: https://github.com/LinusU/base32-decode#readme
 **/
 
 const RFC4648     = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'

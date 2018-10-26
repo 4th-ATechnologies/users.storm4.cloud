@@ -491,7 +491,7 @@ export function makeCloudFileHeader(
 /**
  * Array elements that are null|undefined are ignored.
 **/
-export function concatBuffers(buffers: Array<Uint8Array|null>): Uint8Array
+export function concatBuffers(buffers: Array< Readonly<Uint8Array> | null >): Uint8Array
 {
 	const totalByteLength = buffers.reduce<number>((total, buffer)=> {
 		return total + ((buffer == null) ? 0 : buffer.byteLength);
@@ -515,8 +515,8 @@ export function concatBuffers(buffers: Array<Uint8Array|null>): Uint8Array
 export function encryptData(
 	options: {
 		s4             : S4,
-		cleartext      : Uint8Array,
-		encryption_key : Uint8Array
+		cleartext      : Readonly<Uint8Array>,
+		encryption_key : Readonly<Uint8Array>
 	}
 ): Uint8Array|Error
 {
@@ -569,8 +569,8 @@ export function encryptData(
 export function decryptData(
 	options: {
 		s4             : S4,
-		ciphertext     : Uint8Array,
-		encryption_key : Uint8Array
+		ciphertext     : Readonly<Uint8Array>,
+		encryption_key : Readonly<Uint8Array>
 	}
 ): Uint8Array|Error
 {
@@ -641,8 +641,8 @@ export function decryptData(
 function generateChecksumPrefix(
 	options: {
 		s4             : S4,
-		cleartext      : Uint8Array,
-		encryption_key : Uint8Array
+		cleartext      : Readonly<Uint8Array>,
+		encryption_key : Readonly<Uint8Array>
 	}
 ): Uint8Array|Error
 {
@@ -687,8 +687,8 @@ function generateChecksumPrefix(
 export function wrapSymmetricKey(
 	options: {
 		s4            : S4,
-		public_key    : PubKey,
-		symmetric_key : Uint8Array,
+		public_key    : PubKey|DeepReadonly<PubKey>,
+		symmetric_key : Readonly<Uint8Array>,
 	}
 ): Uint8Array|Error
 {
