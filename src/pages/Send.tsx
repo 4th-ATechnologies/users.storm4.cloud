@@ -755,16 +755,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 	): number
 	{
-		const {file_preview} = options.file_state;
+		const {file, file_state} = options;
+
+		const key_length = file_state.encryption_key.length;
 
 		const header_size    = 64;
-		const thumbnail_size = file_preview ? file_preview.byteLength : 0;
-		const file_size      = options.file.size;
+		const thumbnail_size = file_state.file_preview ? file_state.file_preview.byteLength : 0;
+		const file_size      = file.size;
 
-		const unencrypted = header_size + thumbnail_size + file_size;
+		const sans_padding = header_size + thumbnail_size + file_size;
 
-		const blocks = Math.ceil(unencrypted / NODE_BLOCK_SIZE);
-		return (blocks *  NODE_BLOCK_SIZE);
+		let padding_length = key_length - (sans_padding % key_length);
+		if (padding_length == 0)
+		{
+			// We always force padding at the end of the file.
+			// This increases security a bit,
+			// and also helps when there's a zero byte file.
+			
+			padding_length = key_length;
+		}
+
+		const total_bytes = sans_padding + padding_length;
+		return total_bytes;
 	}
 
 	protected getProgress(
@@ -1735,11 +1747,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// Request anonymous AWS credentials from the Storm4 servers.
 		// These credentials are required in order to perform a PUT into the user's bucket.
 		// 
-		// Note:
-		// The user's bucket is readonly except for the "staging" directory.
-		// Files placed into the staging directory are immediately processed by the server as a request.
-		// Rejected requests are immediately deleted.
-		// 
 		const _fetchCredentials = (
 			state: {
 				rcrd_str : string
@@ -2010,13 +2017,15 @@ class Send extends React.Component<ISendProps, ISendState> {
 			if (encrypted_file_size >= MULTIPART_CUTOVER)
 			{
 				let part_size = (1024 * 1024 * 5);
-				let num_parts = Math.ceil(file.size / part_size);
+				let num_parts = Math.ceil(encrypted_file_size / part_size);
 
 				while (num_parts > 10000)
 				{
 					part_size += (1024 * 1024 * 1);
 					num_parts = Math.ceil(file.size / part_size);
 				}
+
+				log.debug(`multipart config: size(${part_size}) parts(${num_parts})`);
 
 				multipart_state = {
 					part_size,
@@ -2366,11 +2375,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// Request anonymous AWS credentials from the Storm4 servers.
 		// These credentials are required in order to perform a PUT into the user's bucket.
 		// 
-		// Note:
-		// The user's bucket is readonly except for the "staging" directory.
-		// Files placed into the staging directory are immediately processed by the server as a request.
-		// Rejected requests are immediately deleted.
-		// 
 		const _fetchCredentials = (
 			encrypted_cloudfile_data : Uint8Array
 		): void =>
@@ -2512,6 +2516,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		_readFile();
 	}
 
+	/**
+	 * Generic dispatch function.
+	 * 
+	 * Determines what the next step is within the multipart process,
+	 * and invokes the appropriate `uploadFile_mulipart_X()` function.
+	**/
 	protected uploadFile_multipart(
 	): void
 	{
@@ -2599,6 +2609,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = `uploadFile_multipart_initialize(${this.state.upload_index})`;
 		log.debug(METHOD_NAME);
 
+		// UPLOAD FILE (MULTIPART - INITIALIZE)
+		// Step 1 of 3:
+		// 
+		// Request anonymous AWS credentials from the Storm4 servers.
+		// These credentials are required in order to perform a PUT into the user's bucket.
+		// 
 		const _fetchCredentials = (): void => {
 			log.debug(`${METHOD_NAME}._fetchCredentials()`);
 
@@ -2614,6 +2630,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD FILE (MULTIPART - INITIALIZE)
+		// Step 2 of 3:
+		// 
+		// Ask S3 to initialize a multipart operation for us.
+		// Incomplete multipart operations are automatically deleted according to bucket policy.
+		// 
 		const _performRequest = (
 			state: {
 				credentials  : AWSCredentials,
@@ -2668,6 +2690,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD FILE (MULTIPART - INITIALIZE)
+		// Step 3 of 3:
+		// 
+		// Multipart operation is initialized & ready for us to start upload parts.
+		// Update react state, and move onto the next step.
+		// 
 		const _succeed = (
 			state: {
 				key       : string,
@@ -2697,6 +2725,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD FILE (MULTIPART - INITIALIZE)
+		// Step Z: goto FAIL
+		// 
+		// Something bad happened. Bummer.
+		// 
 		const _fail = (upload_err_fatal?: string): void => {
 			log.debug(`${METHOD_NAME}._fail()`);
 
@@ -2715,6 +2748,13 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = `uploadFile_multipart_part(${this.state.upload_index}:${part_index})`;
 		log.debug(METHOD_NAME);
 
+		// UPLOAD FILE (MULTIPART - PART) 
+		// Step 1 of 6:
+		// 
+		// Read a portion of the file.
+		// Since this is a multipart operation, we know the file must be pretty big.
+		// So we don't want to read the entire file into memory all at once.
+		// 
 		const _readChunk = (): void =>
 		{
 			log.debug(`${METHOD_NAME}._readChunk()`);
@@ -2740,19 +2780,46 @@ class Send extends React.Component<ISendProps, ISendState> {
 				}
 			});
 
+			const multipart_offset = multipart_state.part_size * part_index;
+			
+			log.debug(`multipart_state.part_size(${multipart_state.part_size})`);
+			log.debug(`multipart_offset(${multipart_offset})`);
+
 			const headerSize = 64;
 
 			const thumbnail = file_state.file_preview;
 			const thumbnailSize = thumbnail ? thumbnail.byteLength : 0;
 
-			const offset = headerSize + thumbnailSize;
+			const preamble_size = headerSize + thumbnailSize;
 
-			const slice_start = offset + (multipart_state.part_size * part_index);
-			const slice_end = Math.min(slice_start + multipart_state.part_size, file.size);
+			let file_offset_start: number;
+			let file_offset_end  : number;
 
-			file_stream.readAsArrayBuffer(file.slice(slice_start, slice_end));
+			if (part_index == 0)
+			{
+				file_offset_start = 0;
+				file_offset_end = Math.min((multipart_state.part_size - preamble_size), file.size);
+			}
+			else
+			{
+				file_offset_start = multipart_offset - preamble_size;
+				file_offset_end = Math.min((file_offset_start + multipart_state.part_size), file.size);
+			}
+
+			log.debug(`cleartext chunk: start(${file_offset_start}) end(${file_offset_end})`);
+
+			file_stream.readAsArrayBuffer(file.slice(file_offset_start, file_offset_end));
 		}
 
+		// UPLOAD FILE (MULTIPART - PART) 
+		// Step 2 of 6:
+		// 
+		// Pre-process the cleartext chunk.
+		// If this is the first chunk,
+		//  we need to prepend the header & other sections of the "cloud data" file.
+		// If this is the last chunk,
+		//  we may need to add some padding (to make an even block size for encryption).
+		// 
 		const _preprocessChunk = (
 			cleartext_file_data: Uint8Array
 		): void =>
@@ -2833,6 +2900,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			}
 		}
 
+		// UPLOAD FILE (MULTIPART - PART) 
+		// Step 3 of 6:
+		// 
+		// Encrypt the chunk (using Threefish).
+		// 
 		const _encryptChunk = (
 			cleartext_cloudfile_chunk: Uint8Array
 		): void =>
@@ -2913,6 +2985,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			_fetchCredentials(encrypted_cloudfile_chunk);
 		}
 
+		// UPLOAD FILE (MULTIPART - PART)
+		// Step 4 of 6:
+		// 
+		// Request anonymous AWS credentials from the Storm4 servers.
+		// These credentials are required in order to perform a PUT into the user's bucket.
+		// 
 		const _fetchCredentials = (
 			encrypted_cloudfile_chunk: Uint8Array
 		): void =>
@@ -2931,6 +3009,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD FILE (MULTIPART - PART) 
+		// Step 5 of 6:
+		// 
+		// Perform PUT into "staging" directory of user's bucket.
+		// We are requesting permission to have the server copy the file into the user's inbox.
+		// 
 		const _performUpload = (
 			state: {
 				encrypted_cloudfile_chunk : Uint8Array,
@@ -2995,26 +3079,57 @@ class Send extends React.Component<ISendProps, ISendState> {
 					log.err("${METHOD_NAME}: s3.createMultipartUpload(): unable to extract upload_id !");
 
 					_fail();
-					return;
 				}
-
-				this.setState((current)=> {
-					const next = _.cloneDeep(current) as ISendState;
-
-					const _multipart_state = next.upload_state!.files[upload_index].multipart_state!;
-
-					_multipart_state.progress[part_index] = 1.0;
-					_multipart_state.eTags[part_index] = eTag;
-
-					return next;
-
-				}, ()=> {
-
-					this.uploadNext();
-				});
+				else
+				{
+					_succeed({...state, eTag});
+				}
 			});
 		}
 
+		// UPLOAD FILE (MULTIPART - PART)
+		// Step 6 of 6:
+		// 
+		// Successfully uploaded part to S3,
+		// and received a good response (directly from S3, not from Storm4 servers).
+		// 
+		const _succeed = (
+			state: {
+				encrypted_cloudfile_chunk : Uint8Array,
+				credentials               : AWSCredentials
+				eTag                      : string
+			}
+		): void =>
+		{
+			const SUB_METHOD_NAME = "_succeed()";
+			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
+
+			const {eTag} = state;
+
+			this.setState((current)=> {
+				const next = _.cloneDeep(current) as ISendState;
+
+				const upload_index    = next.upload_index;
+				const upload_state    = next.upload_state!;
+				const file_state      = upload_state!.files[upload_index];
+				const multipart_state = file_state.multipart_state!;
+
+				multipart_state.progress[part_index] = 1.0;
+				multipart_state.eTags[part_index] = eTag;
+
+				return next;
+
+			}, ()=> {
+
+				this.uploadNext();
+			});
+		}
+
+		// UPLOAD FILE (MULTIPART - PART) 
+		// Step Z: goto FAIL
+		// 
+		// Something bad happened. Bummer.
+		//
 		const _fail = (upload_err_fatal?: string): void => {
 			log.debug(`${METHOD_NAME}._fail()`);
 
@@ -3024,8 +3139,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 				const next = _.cloneDeep(current) as ISendState;
 
-				const upload_index = next.upload_index;
-				const upload_state = next.upload_state; 
+				const upload_index    = next.upload_index;
+				const upload_state    = next.upload_state; 
 				const file_state      = upload_state!.files[upload_index];
 				const multipart_state = file_state.multipart_state!;
 
@@ -3048,7 +3163,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const file_state      = upload_state.files[upload_index];
 				const multipart_state = file_state.multipart_state!;
 
-				multipart_state.progress[part_index] = 0;
+				multipart_state.progress[part_index] = 0; // start displaying progress bar
 			});
 
 			_readChunk();
@@ -3065,7 +3180,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		// Because it sucks.
 		// 
 		// If you use S3, then the response might get lost.
-		// Which we are unable to recover from .
+		// Which we are unable to recover from.
 		// 
 		// We use our own API to get around this problem.
 
@@ -3099,6 +3214,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 				upload_id    : multipart_state.upload_id || "",
 				parts        : parts
 			};
+
+			log.debug("Multipart complete request: "+ JSON.stringify(json, null, 2));
 
 			const json_str = JSON.stringify(json, null, 0);
 
