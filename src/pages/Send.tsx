@@ -611,15 +611,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 	/**
 	 * Returns the index of the identity that should be displayed.
-	 * That is:
+	 * 
+	 * Precisely, this index here:
 	 * - state.user_profile.auth0.identities[THIS_NUMBER_HERE]
 	 * 
-	 * This is done by checking the various posibilities including:
+	 * Explanation:
+	 * A user may have linked multiple identities to their Storm4 account.
+	 * For example, they may have linked all of the following:
+	 * - Facebook
+	 * - LinkedIn
+	 * - Twitter
+	 * - GitHub
+	 * - Microsoft
+	 * 
+	 * So which of these identities do we display ?
+	 * Remember, each identity might have a different name & avatar.
+	 * 
+	 * To make this decision, we consult various sources:
 	 * - query parameters
 	 * - the user's preferred identity
 	 * - an explicitly selected identity
 	**/
-	protected getIdentityIdx = (): number => {
+	protected getIdentityIdx(): number {
 
 		const react_state = this.state as DeepReadonly<ISendState>;
 		const user_profile = react_state.user_profile;
@@ -663,6 +676,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 		return 0;
 	}
 
+	/**
+	 * Returns the location within the user's bucket where the file was moved after processing.
+	 * That is, the file was uploaded to the "staging" area for processing by the server.
+	 * If the server accepted the request, it would be moved to this location.
+	**/
 	protected getCloudPath(
 		file_state: UploadState_File|DeepReadonly<UploadState_File>
 	): string
@@ -670,6 +688,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 		return `com.4th-a.storm4/temp/${file_state.random_filename}`;
 	}
 
+	/**
+	 * All the files in a user's bucket are readonly with one exception - files in the "staging" directory.
+	 * Files can be uploaded there, and will be automatically processed by the server.
+	 * If the server rejects the file for any reason (permissions, etc),
+	 * the file will be immediately deleted.
+	 * Otherwise it will be moved into the user's filesystem according to the request.
+	 * 
+	 * There's a general format for the staging path that must be followed:
+	 * staging/<version>/<app>/<command>:[options...]/.../<requestID>
+	 * 
+	 * For example:
+	 * staging/2/com.4th-a.storm4/put-if-nonexistent/inbox/uuid.rcrd/uuid
+	**/
 	protected getStagingPathForFile(
 		options: {
 			file_state    : UploadState_File|DeepReadonly<UploadState_File>,
@@ -720,7 +751,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 	protected getEncryptedFileSize(
 		options: {
 			file       : ImageFile,
-			file_state : UploadState_File|DeepReadonly<UploadState_File>
+			file_state : DeepReadonly<UploadState_File>
 		}
 	): number
 	{
@@ -780,6 +811,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		return progress;
 	}
 
+	/**
+	 * We upload files directly to S3, which triggers our server to start processing the request.
+	 * The processing typically happens almost immediately, but occassionally there are slowdowns.
+	**/
 	protected getPollingBackoff(fail_count: number): number
 	{
 		// - A => failCount
@@ -816,7 +851,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		else                  { return 1000 * 14.0; }
 	}
 
-	protected fetchUserProfile = ()=> {
+	protected fetchUserProfile() {
 		log.debug("fetchUserProfile()");
 
 		users_cache.fetchUserProfile(this.props.user_id, (err, status_code, user_profile)=> {
@@ -879,7 +914,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	public fetchPublicKey = ()=> {
+	public fetchPublicKey() {
 		log.debug("fetchPublicKey()");
 
 		const react_state = this.state as DeepReadonly<ISendState>;
@@ -953,7 +988,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	public fetchBlockchainInfo = (): void => {
+	public fetchBlockchainInfo(): void {
 		log.debug("fetchBlockchainInfo()");
 
 		const react_state = this.state as DeepReadonly<ISendState>;
@@ -1034,7 +1069,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	public fetchMerkleTree = (): void => {
+	public fetchMerkleTree(): void {
 		log.debug("fetchMerkleTree()");
 
 		const react_state = this.state as DeepReadonly<ISendState>;
@@ -1102,7 +1137,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected verifyPublicKey = (): void => {
+	protected verifyPublicKey(): void {
 		log.debug("verifyPublicKey()");
 
 		const react_state = this.state as DeepReadonly<ISendState>;
@@ -1203,10 +1238,10 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected userIdentsMenuButtonClicked = (
+	protected onUserIdentsMenuButtonClicked = (
 		event   : React.MouseEvent<HTMLElement>
 	): void => {
-		log.debug("userIdentsMenuButtonClicked()");
+		log.debug("onUserIdentsMenuButtonClicked()");
 		
 		this.setState({
 			userIdentsMenuAnchor : event.currentTarget,
@@ -1214,12 +1249,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected userIdentsMenuItemSelected = (
+	protected onUserIdentsMenuItemSelected = (
 		index : number,
 		event : React.MouseEvent<HTMLElement>
 	): void =>
 	{
-		log.debug(`userIdentsMenuItemSelected(${index})`);
+		log.debug(`onUserIdentsMenuItemSelected(${index})`);
 
 		let idh: string|null = null;
 
@@ -1253,8 +1288,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected userIdentsMenuClosed = ()=> {
-		log.debug("userIdentsMenuClosed()");
+	protected onUserIdentsMenuClosed = ()=> {
+		log.debug("onUserIdentsMenuClosed()");
 
 		this.setState({
 			userIdentsMenuAnchor : null,
@@ -1282,12 +1317,12 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected deleteFile = (
+	protected onDeleteFile = (
 		index : number,
 		event : string
 	): void =>
 	{
-		log.debug("deleteFile(): "+ index);
+		log.debug("onDeleteFile(): "+ index);
 
 		this.setState((current_state)=> {
 
@@ -1298,19 +1333,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected commentTextFieldChanged = (
+	protected onCommentTextFieldChanged = (
 		event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
 	) => {
 		const newValue = event.target.value;
-		log.debug("commentTextFieldChanged() => "+ newValue);
+		log.debug("onCommentTextFieldChanged() => "+ newValue);
 
 		this.setState({
 			commentTextFieldStr: newValue
 		});
 	}
 
-	protected onSend = (): void => {
-		log.debug("onSend()");
+	protected onSendButtonClicked = (): void => {
+		log.debug("onSendButtonClicked()");
 
 		const react_state = this.state as DeepReadonly<ISendState>;
 		if (react_state.is_uploading) {
@@ -1318,7 +1353,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 			return;
 		}
 
-	//	this.runTests();
 		this.uploadStart();
 	}
 
@@ -1367,8 +1401,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		});
 	}
 
-	protected onRetryNow = (): void => {
-		log.debug("onRetryNow()");
+	protected onRetryNowButtonClicked = (): void => {
+		log.debug("onRetryNowButtonClicked()");
 
 		this.setState({
 			upload_err_retry: null
@@ -1377,8 +1411,8 @@ class Send extends React.Component<ISendProps, ISendState> {
 		})
 	}
 
-	protected onStartOver = (): void => {
-		log.debug("onStartOver()");
+	protected onStartOverButtonClicked = (): void => {
+		log.debug("onStartOverButtonClicked()");
 
 		this.setState(()=> {
 			return getStartingState();
@@ -1392,34 +1426,6 @@ class Send extends React.Component<ISendProps, ISendState> {
 
 		this.setState({
 			is_captcha_verified: (token != null)
-		});
-	}
-
-	protected runTests(): void {
-		log.debug("runTests()");
-
-		const react_state = this.state as DeepReadonly<ISendState>;
-
-		const encryption_key = util.randomEncryptionKey();
-		const random_filename = util.randomFileName();
-
-		const request_id_rcrd = util.randomHexString(16);
-		const request_id_data = util.randomHexString(16);
-
-		const file_state: UploadState_File = {
-			encryption_key,
-			random_filename,
-			request_id_rcrd,
-			request_id_data,
-			file_preview      : null,
-			has_uploaded_rcrd : false,
-			unipart_progress  : 0
-		};
-
-		util.wrapSymmetricKey({
-			s4            : global_s4!,
-			public_key    : react_state.public_key! as PubKey,
-			symmetric_key : file_state.encryption_key
 		});
 	}
 
@@ -1617,6 +1623,32 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = `uploadRcrd(${this.state.upload_index})`;
 		log.debug(METHOD_NAME);
 
+		// UPLOAD RCRD
+		// Step 1 of 4:
+		// 
+		// We need to generate the "*.rcrd" file.
+		// This is just a JSON file that looks something like this:
+		// {
+		//   version: 3,
+		//   keys: {
+		//     "userID_of_recipient": {
+		//       perms: "rws",
+		//       key: <base64(encryptUsingRecipientPubKey(fileEncryptionKey))>
+		//     }
+		//   },
+		//   metadata: <base64(encryptUsingFileEncryptionKey({filename}))>,
+		//   burnDate: <30 days from now>
+		// }
+		// 
+		// To summarize:
+		// - The RCRD contains metadata about the encrypted file we're going to upload:
+		//   - The encryption key we're going to use to encrypt the file (random 512-bit key)
+		//   - The filename
+		// - This information is encrypted such that only the recipient can decrypt it
+		//    - The encryption key is wrapped using the recipients public key
+		//       (Private key is required to decrypt it, and ONLY recipient knows his/her private key.)
+		//    - Even the filename is encrypted (with the random 512-bit key)
+		// 
 		const _generateRcrdData = (): void => {
 			const SUB_METHOD_NAME = "_generateRcrdData()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
@@ -1646,7 +1678,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				const metadata_ciphertext_data = util.encryptData({
 					s4             : global_s4!,
 					cleartext      : metadata_cleartext_data,
-					encryption_key : file_state.encryption_key as Uint8Array
+					encryption_key : file_state.encryption_key
 				});
 
 				if (_.isError(metadata_ciphertext_data))
@@ -1697,6 +1729,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 			_fetchCredentials({rcrd_str});
 		}
 
+		// UPLOAD RCRD
+		// Step 2 of 4:
+		// 
+		// Request anonymous AWS credentials from the Storm4 servers.
+		// These credentials are required in order to perform a PUT into the user's bucket.
+		// 
+		// Note:
+		// The user's bucket is readonly except for the "staging" directory.
+		// Files placed into the staging directory are immediately processed by the server as a request.
+		// Rejected requests are immediately deleted.
+		// 
 		const _fetchCredentials = (
 			state: {
 				rcrd_str : string
@@ -1717,6 +1760,21 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD RCRD
+		// Step 3 of 4:
+		// 
+		// Performs the PUT into the recipients "staging" directory.
+		// We are requesting permission to have the server copy the file into the user's inbox.
+		// 
+		// Note:
+		// The response we receive is the response from S3 (not from the Storm4 server).
+		// So after all RCRD files have been uploaded, we're going to ask the Storm4 server for its
+		// response to our request(s). It might reject us for various reasons:
+		// 
+		// - user doesn't allow anonymous users to send file
+		// - user's inbox is full (user configured limit)
+		// - etc
+		// 
 		const _performUpload = (
 			state: {
 				rcrd_str     : string,
@@ -1763,6 +1821,16 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD RCRD
+		// Step 4 of 4:
+		// 
+		// Successfully uploaded "*.rcrd" file to S3,
+		// and received a good 200 response (directly from S3, not from Storm4 servers).
+		// 
+		// Now we need to:
+		// - update react state
+		// - move onto the next task: uploadNext()
+		// 
 		const _succeed = (
 			state: {
 				rcrd_str     : string,
@@ -1793,6 +1861,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD RCRD
+		// Step Z: goto FAIL
+		// 
+		// Something bad happened. Bummer.
+		// 
 		const _fail = (upload_err_fatal?: string): void => {
 			log.debug(`${METHOD_NAME}._fail()`);
 
@@ -1810,6 +1883,19 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = `uploadFile(${this.state.upload_index})`;
 		log.debug(`${METHOD_NAME}`);
 
+		// UPLOAD FILE (PRE-PROCESSING)
+		// Step 1 of 3:
+		// 
+		// If the file has a "preview" (thumbnail image), we're going to read it.
+		// Generally only images have previews that we can read.
+		// 
+		// What are we going to do with the thumbnail ?
+		// We're going to put it in the "thumbnail" section of the "*.data" file.
+		// This allows the recipient to download the thumbnail of the image without
+		// downloading the entire "*.data" file.
+		// 
+		// Note: The entire "*.data" file is encrypted. So yes, the thumbnail is encrypted too.
+		// 
 		const _readThumbnail = (): void => {
 			const SUB_METHOD_NAME = "_readThumbnail()"
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
@@ -1879,6 +1965,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 			img.src = file.preview;
 		}
 
+		// UPLOAD FILE (PRE-PROCESSING)
+		// Step 2 of 3:
+		// 
+		// Do we need to use multipart to upload this file ?
+		// It's a good idea to use multipart for very large files...
+		// 
+		// We make that decision here.
+		// 
 		const _determineMultipart = (
 			file_preview: Uint8Array
 		): void =>
@@ -1966,6 +2060,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 			});
 		}
 
+		// UPLOAD FILE (PRE-PROCESSING)
+		// Step 3 of 3:
+		// 
+		// We're done with pre-processing steps:
+		// - file thumbnail has been extracte (if possible)
+		// - multipart decision has been rendered
+		// 
+		// Time to dispatch to proper uploader:
+		// - unipart
+		// - multipart
+		// 
 		const _dispatch = () => {
 			const SUB_METHOD_NAME = "_dispatch()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
@@ -1992,11 +2097,17 @@ class Send extends React.Component<ISendProps, ISendState> {
 			const upload_state = react_state.upload_state!;
 			const file_state   = upload_state!.files[upload_index];
 
+			// Have we pre-processed this file before ?
+			// 
+			// file_state.file_preview is null                 => NO
+			// file_state.file_preview is empty Uint8Array     => YES (and it doesn't have a preview)
+			// file_state.file_preview is non-empty Uint8Array => YES (and it has a preview)
+
 			if (file_state.file_preview == null) {
-				_readThumbnail();
+				_readThumbnail(); // start pre-processing steps
 			}
 			else {
-				_dispatch();
+				_dispatch(); // skip pre-processing (we've already performed this task)
 			}
 		}
 	}
@@ -2007,6 +2118,15 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const METHOD_NAME = `uploadFile_unipart(${this.state.upload_index})`;
 		log.debug(`${METHOD_NAME}`);
 
+		// UPLOAD FILE (UNIPART)
+		// Step 1 of 5:
+		// 
+		// Read the file into memory.
+		// 
+		// Note:
+		// Since we're not using multipart, we know this is a small-ish file.
+		// So we shouldn't have any problems with memory restrictions here.
+		// 
 		const _readFile = (): void => {
 			const SUB_METHOD_NAME = "_readFile()";
 			log.debug(`${METHOD_NAME}.${SUB_METHOD_NAME}`);
@@ -2031,6 +2151,28 @@ class Send extends React.Component<ISendProps, ISendState> {
 			file_stream.readAsArrayBuffer(file);
 		}
 
+		// UPLOAD FILE (UNIPART)
+		// Step 2 of 5:
+		// 
+		// Convert from the raw file to a "cloud file".
+		// A "cloud file" is a standardized wrapper that contains a header, the file & other optional sections.
+		// 
+		// You might be wondering: why bother with the "cloud file" stuff ?
+		// One reason is because of encryption.
+		// 
+		// We're going to encrypt the entire file.
+		// So after decrypting the file, how do we know we had the correct key ?
+		// I.e. how can we be sure we decrypted the file properly ?
+		// 
+		// Our solution is to include a header, which has "magic bytes" at the beginning of it.
+		// This allows us to verify that the encryption key is correct after decrypting only the first block.
+		// 
+		// We take advantage of this header to support other sections.
+		// In particular, the thumbnail section allows a user to download a tiny portion
+		// of the encrypted "*.data" file in order to extract an image's thumbnail.
+		// 
+		// This is particularly helpful on mobile devices.
+		// 
 		const _preprocessFile = (
 			cleartext_file_data: Uint8Array
 		): void =>
@@ -3803,7 +3945,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				section_identitiesButton = (
 					<Tooltip title="Show all identities linked to user's account.">
-						<IconButton onClick={this.userIdentsMenuButtonClicked}>
+						<IconButton onClick={this.onUserIdentsMenuButtonClicked}>
 							<Badge badgeContent={identities.length} color="primary">
 								<MoreVertIcon />
 							</Badge>
@@ -3841,7 +3983,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 				<Menu
 					anchorEl={react_state.userIdentsMenuAnchor as HTMLElement}
 					open={react_state.userIdentsMenuOpen}
-					onClose={this.userIdentsMenuClosed}
+					onClose={this.onUserIdentsMenuClosed}
 				>
 				{identities.map((identity, index) => {
 
@@ -3849,7 +3991,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					const idUrl = util.imageUrlForIdentity(identity, user_profile.s4);
 					const displayName = util.displayNameForIdentity(identity, user_profile.s4);
 
-					const onClick = this.userIdentsMenuItemSelected.bind(this, index);
+					const onClick = this.onUserIdentsMenuItemSelected.bind(this, index);
 
 					return (
 						<MenuItem
@@ -4547,7 +4689,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					<Button
 						variant="contained"
 						color="secondary"
-						onClick={this.onStartOver}
+						onClick={this.onStartOverButtonClicked}
 						className={classes.uploadInfo_button}
 					>Start Over</Button>
 				</div>
@@ -4596,7 +4738,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					<Button
 						variant="contained"
 						color="secondary"
-						onClick={this.onRetryNow}
+						onClick={this.onRetryNowButtonClicked}
 						className={classes.uploadInfo_button}
 					>Retry Now</Button>
 				</div>
@@ -4633,7 +4775,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					<Button
 						variant="contained"
 						color="primary"
-						onClick={this.onStartOver}
+						onClick={this.onStartOverButtonClicked}
 						className={classes.uploadInfo_button}
 					>Start Over</Button>
 				</div>
@@ -5129,7 +5271,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 		else
 		{
-			const onClick = this.deleteFile.bind(this, idx);
+			const onClick = this.onDeleteFile.bind(this, idx);
 
 			return (
 				<TableRow key={`${idx}`} className={classes.tableRow}>
@@ -5213,7 +5355,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					margin="normal"
 					multiline={true}
 					disabled={is_disabled}
-					onChange={this.commentTextFieldChanged}
+					onChange={this.onCommentTextFieldChanged}
 					className={classes.comment}
 					inputProps={{
 						maxLength: COMMENT_MAX_LENGTH,
@@ -5250,7 +5392,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 					variant="contained"
 					color="primary"
 					disabled={is_disabled}
-					onClick={this.onSend}
+					onClick={this.onSendButtonClicked}
 				>Send Files Securely</Button>
 			</div>
 		);
