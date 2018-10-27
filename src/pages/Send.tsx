@@ -2958,7 +2958,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{
 				const cloudfile_offset = (multipart_state.part_size * part_index) + chunk_offset;
 
-				if (cloudfile_offset == 0 || (cloudfile_offset % NODE_BLOCK_SIZE) == 0)
+				if (chunk_offset == 0 || cloudfile_offset == 0 || (cloudfile_offset % NODE_BLOCK_SIZE) == 0)
 				{
 					const tweek = new Uint8Array(16); // uint64_t[2]
 
