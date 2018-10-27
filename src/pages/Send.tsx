@@ -2343,7 +2343,14 @@ class Send extends React.Component<ISendProps, ISendState> {
 						tweek_offset += little_endian_bytes_uint64.length;
 					}
 
-					s4.tbc_setTweek(tbc_context, tweek);
+					const tweek_err = s4.tbc_setTweek(tbc_context, tweek);
+					if (tweek_err != S4Err.NoErr)
+					{
+						s4.tbc_free(tbc_context);
+						
+						_fail(s4.err_str() || "Unable to set encryption tweek!");
+						return;
+					}
 				}
 
 			//	log.debug(`Encrypting chunk: offset:${offset} length:${key_length}`);
@@ -2945,43 +2952,60 @@ class Send extends React.Component<ISendProps, ISendState> {
 				return;
 			}
 
-			const cloudfile_offset = multipart_state.part_size * part_index;
+			const encrypted_chunks: Uint8Array[] = [];
 
-			const tweek = new Uint8Array(16); // uint64_t[2]
-
-			const tweek_uint64: number[] = [];
-			tweek_uint64.push(Math.min(cloudfile_offset / NODE_BLOCK_SIZE));
-			tweek_uint64.push(0);
-
-			let tweek_offset = 0;
-			for (const uint64 of tweek_uint64)
+			for (let chunk_offset = 0; chunk_offset < cleartext_cloudfile_chunk.length; chunk_offset += key_length)
 			{
-				const bn = new BN(uint64);
-				const little_endian_bytes_uint64 = bn.toArray("le", 8);
+				const cloudfile_offset = (multipart_state.part_size * part_index) + chunk_offset;
 
-				tweek.set(little_endian_bytes_uint64, tweek_offset);
-				tweek_offset += little_endian_bytes_uint64.length;
-			}
+				if (cloudfile_offset == 0 || (cloudfile_offset % NODE_BLOCK_SIZE) == 0)
+				{
+					const tweek = new Uint8Array(16); // uint64_t[2]
 
-			const tweek_err = s4.tbc_setTweek(tbc_context, tweek);
-			if (tweek_err != S4Err.NoErr)
-			{
-				s4.tbc_free(tbc_context);
-				
-				_fail(s4.err_str() || "Unable to set encryption tweek!");
-				return;
-			}
+					const tweek_uint64: number[] = [];
+					tweek_uint64.push(Math.min(cloudfile_offset / NODE_BLOCK_SIZE));
+					tweek_uint64.push(0);
 
-			const encrypted_cloudfile_chunk = s4.tbc_encrypt(tbc_context, cleartext_cloudfile_chunk);
-			if (encrypted_cloudfile_chunk == null)
-			{
-				s4.tbc_free(tbc_context);
+					let tweek_offset = 0;
+					for (const uint64 of tweek_uint64)
+					{
+						const bn = new BN(uint64);
+						const little_endian_bytes_uint64 = bn.toArray("le", 8);
 
-				_fail(s4.err_str() || "Unable to encrypt file!");
-				return;
+						tweek.set(little_endian_bytes_uint64, tweek_offset);
+						tweek_offset += little_endian_bytes_uint64.length;
+					}
+
+					const tweek_err = s4.tbc_setTweek(tbc_context, tweek);
+					if (tweek_err != S4Err.NoErr)
+					{
+						s4.tbc_free(tbc_context);
+						
+						_fail(s4.err_str() || "Unable to set encryption tweek!");
+						return;
+					}
+				}
+
+			//	log.debug(`Encrypting chunk: offset:${offset} length:${key_length}`);
+
+				const cleartext_chunk = new Uint8Array(cleartext_cloudfile_chunk.buffer, chunk_offset, key_length);
+				const encrypted_chunk = s4.tbc_encrypt(tbc_context, cleartext_chunk);
+
+				if (encrypted_chunk == null)
+				{
+					s4.tbc_free(tbc_context);
+
+					_fail(`Error encrypting file: ${s4.err_code}: ${s4.err_str()}`);
+					return;
+				}
+
+				encrypted_chunks.push(encrypted_chunk);
 			}
 
 			s4.tbc_free(tbc_context);
+			const encrypted_cloudfile_chunk = util.concatBuffers(encrypted_chunks);
+
+			// Next step
 			_fetchCredentials(encrypted_cloudfile_chunk);
 		}
 
