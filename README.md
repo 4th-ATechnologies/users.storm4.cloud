@@ -4,7 +4,7 @@ This is the source code for the website: [https://users.storm4.cloud](https://us
 
 This project allows anybody to send files **securely** to Storm4 users.
 
-And when I say securely, I mean real security. As in, when Alice sends a file to Bob, **there’s nobody else in the entire world who can read the file** except Bob. Not even the engineers who maintain the backend servers. Not even the development team who writes the code. Nobody. Nada.
+And when we say securely, we mean real security. As in, when Alice sends a file to Bob, **there’s nobody else in the entire world who can read the file** except Bob. Not even the engineers who maintain the backend servers. Not even the development team who writes the code. Nobody. Nada.
 
 ### Security
 
@@ -94,6 +94,6 @@ $ npm run start
 You are free to use the code for any purpose. Common requests we receive from Storm4 users:
 
 - The ability to theme their specific page
-- A custom widget for their website, wordpress, weebly...
+- A custom widget for their website, wordpress, ...
 
 These are all possible, if you code it yourself :D - and this codebase serves as a reference implementation.
