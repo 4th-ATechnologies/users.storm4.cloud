@@ -30,10 +30,13 @@ import {
 	WithStyles 
 } from '@material-ui/core/styles';
 
+import withWidth, { isWidthUp, WithWidth } from '@material-ui/core/withWidth';
+
 import Avatar from '@material-ui/core/Avatar';
 import Badge from '@material-ui/core/Badge';
 import Button from '@material-ui/core/Button';
 import CircularProgress from '@material-ui/core/CircularProgress';
+import Divider from '@material-ui/core/Divider';
 import IconButton from '@material-ui/core/IconButton';
 import ListItemIcon from '@material-ui/core/ListItemIcon';
 import ListItemText from '@material-ui/core/ListItemText';
@@ -53,6 +56,7 @@ import AccountCircleIcon from '@material-ui/icons/AccountCircle';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import SendIcon from '@material-ui/icons/Send';
 
+
 const log = (process.env.REACT_APP_STAGE == "dev") ?
 	Logger.Make('Search', 'debug') :
 	Logger.Make('Search', 'info');
@@ -62,23 +66,34 @@ const AVATAR_SIZE = 64;
 const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	root: {
 	},
-	section_explanation: {
-		textAlign: 'center',
-		margin: 0,
-		paddingLeft: 0,
-		paddingRight: 0,
-		paddingTop: theme.spacing.unit * 2,
-		paddingBottom: 0,
-	},
 	explanation_title: {
-		margin: 0,
-		padding: 0
+		[theme.breakpoints.up('sm')]: { // everything except 'xs'
+			textAlign: 'center',
+			paddingLeft: theme.spacing.unit,
+			paddingRight: theme.spacing.unit,
+		},
+		[theme.breakpoints.only('xs')]: {
+			textAlign: 'center',
+			paddingLeft: theme.spacing.unit,
+			paddingRight: theme.spacing.unit,
+		},
+		paddingTop: theme.spacing.unit * 2
 	},
 	explanation_p: {
+		[theme.breakpoints.up('sm')]: { // everything except 'xs'
+			textAlign: 'center',
+			paddingLeft: theme.spacing.unit,
+			paddingRight: theme.spacing.unit,
+		},
+		[theme.breakpoints.only('xs')]: {
+			textAlign: 'left',
+			paddingLeft: theme.spacing.unit,
+			paddingRight: theme.spacing.unit,
+		},
 		paddingTop: theme.spacing.unit,
 		lineHeight: 1.75
 	},
-	explanation_productLink: {
+	explanation_link: {
 		color: 'inherit',
 		textDecoration: 'underline',
 		textDecorationColor: 'rgba(193,193,193,0.6)',
@@ -242,12 +257,12 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		}
 	},
 	section_footer: {
-		marginTop: theme.spacing.unit * 2,
+		marginTop: theme.spacing.unit * 6,
 		padding: 0
 	},
 	footer_text: {
 		margin: 0,
-		paddingTop: 0,
+		paddingTop: theme.spacing.unit * 2,
 		paddingBottom: 0,
 		paddingLeft: theme.spacing.unit * 2,
 		paddingRight: theme.spacing.unit * 2,
@@ -256,7 +271,7 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 		color: 'rgba(255,255,255,0.8)',
 		lineHeight: 1.75
 	},
-	footer_productLink: {
+	footer_link: {
 		color: 'inherit',
 		textDecoration: 'underline',
 		textDecorationColor: 'rgba(193,193,193,0.6)',
@@ -302,7 +317,7 @@ interface UserIdentsMenuButtonClickedOptions {
 	selectedIdx : number
 }
 
-interface ISearchProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
+interface ISearchProps extends RouteComponentProps<any>, WithStyles<typeof styles>, WithWidth {
 }
 
 interface ISearchState {
@@ -966,6 +981,43 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		}
 	}
 
+	protected renderExplanation(): React.ReactNode {
+		const {classes} = this.props;
+
+		if (isWidthUp('sm', this.props.width))
+		{
+			return (
+				<Typography variant="subheading" className={classes.explanation_p} >
+					&#9675; Send files to any <a href='https://www.storm4.cloud' className={classes.explanation_link}>Storm4</a> user.<br/>
+					&#9675; Files are encrypted in your browser before uploading.<br/>
+					&#9675; Only the recipient can decrypt & read the files you send.<br/>
+					&#9675; Storm4 users have their public keys secured on the <a href="https://www.storm4.cloud/blockchain.html" className={classes.explanation_link}>blockchain</a>.<br/>
+				</Typography>
+			);
+		}
+		else
+		{
+			return (
+				<Typography variant="subheading" className={classes.explanation_p} >
+					<ul>
+						<li>
+							Send files to any <a href='https://www.storm4.cloud' className={classes.explanation_link}>Storm4</a> user.
+						</li>
+						<li>
+							Files are encrypted in your browser before uploading.		
+						</li>
+						<li>
+							Only the recipient can decrypt & read the files you send.
+						</li>
+						<li>
+							Storm4 users have their public keys secured on the <a href="https://www.storm4.cloud/blockchain.html" className={classes.explanation_link}>blockchain</a>.
+						</li>
+					</ul>
+				</Typography>
+			);
+		}
+	}
+
 	protected renderSearchFields(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
@@ -1059,7 +1111,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		);
 	}
 
-	public renderSearchResultsTable(): React.ReactNode {
+	protected renderSearchResultsTable(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
 
@@ -1350,42 +1402,48 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 		);
 	}
 
-	public renderFooter(): React.ReactNode {
-		const state = this.state;
+	protected renderFooter(): React.ReactNode {
 		const {classes} = this.props;
 
-		return (
-			<div className={classes.section_footer}>
-				<Typography className={classes.footer_text}>
-					Crypto Cloud Storage<br/>
-					<a href='https://www.storm4.cloud' className={classes.footer_productLink}>https://www.storm4.cloud</a>
-				</Typography>
-			</div>
-		);
+		if (isWidthUp('sm', this.props.width))
+		{
+			// No footer - using "fork me on github" banner instead
+			return (
+				<div/>
+			);
+		}
+		else
+		{
+			return (
+				<div className={classes.section_footer}>
+					<Divider className={classes.divider}/>
+					<Typography className={classes.footer_text}>
+						This website is open source<br/>
+						<a href='https://www.storm4.cloud' className={classes.footer_link}>Fork me on GitHub</a>
+					</Typography>
+				</div>
+			);
+		}
 	}
 
 	public render(): React.ReactNode {
 		const state = this.state;
 		const {classes} = this.props;
 
-		const section_search = this.renderSearchFields();
-		const section_table  = this.renderSearchResultsTable();
+		const section_explanation = this.renderExplanation();
+		const section_search      = this.renderSearchFields();
+		const section_table       = this.renderSearchResultsTable();
+		const section_footer      = this.renderFooter();
 
 		return (
 			<div className={classes.root}>
-				<div className={classes.section_explanation}>
-					<Typography variant="display2" className={classes.explanation_title} >
-						SEND FILES SECURELY
-					</Typography><br/>
-					<Typography variant="subheading" className={classes.explanation_p} >
-						Send files to any <a href='https://www.storm4.cloud' className={classes.explanation_productLink}>Storm4</a> user.<br/>
-						Files are encrypted in your browser before uploading.<br/>
-						Only the recipient can decrypt & read the files you send.<br/>
-						Storm4 users have their public keys secured on the blockchain.<br/>
-					</Typography>
-				</div>
+				<Typography variant="display2" className={classes.explanation_title} >
+					SEND FILES SECURELY
+				</Typography><br/>
+				{section_explanation}
 				{section_search}
 				{section_table}
+				{section_footer}
 			</div>
 		);
 	}
@@ -1397,4 +1455,4 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 	}
 }
 
-export default withStyles(styles)(withRouter(Search));
+export default withWidth()(withStyles(styles)(withRouter(Search)));

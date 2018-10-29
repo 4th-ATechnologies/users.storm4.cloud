@@ -29,7 +29,7 @@ interface ModuleLoader extends S4Module {
 	isRuntimeInitialized: boolean
 }
 
-declare var onModuleS4Initialized: any[];
+declare var onModuleS4Initialized: Array<()=>void>;
 declare var ModuleS4: ModuleLoader;
 
 let global_s4 : S4|null = null;
@@ -1472,9 +1472,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		}
 		else {
 			log.info("Waiting for WASM crypto library...");
-			onModuleS4Initialized.push(()=> {
-				wasmReady();
-			});
+			onModuleS4Initialized.push(wasmReady);
 		}
 	}
 

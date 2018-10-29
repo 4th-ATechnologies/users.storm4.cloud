@@ -17,6 +17,8 @@ import {
 	WithStyles 
 } from '@material-ui/core/styles';
 
+import withWidth, { isWidthUp, WithWidth } from '@material-ui/core/withWidth';
+
 import CssBaseline from '@material-ui/core/CssBaseline';
 import Typography from '@material-ui/core/Typography';
 
@@ -86,10 +88,16 @@ const styles: StyleRulesCallback = (theme: Theme) => createStyles({
 	a_hideLink: {
 		color: 'inherit',
 		textDecoration: 'none'
+	},
+	forkMe: {
+		position: "absolute",
+		top: 0,
+		right: 0,
+		border: 0
 	}
 });
 
-interface IAppProps extends RouteComponentProps<any>, WithStyles<typeof styles> {
+interface IAppProps extends RouteComponentProps<any>, WithStyles<typeof styles>, WithWidth {
 }
 
 interface IAppState {
@@ -99,6 +107,18 @@ class App extends React.Component<IAppProps, IAppState> {
 
 	public render() {
 		const {classes} = this.props;
+
+		let githubBanner: React.ReactNode|null = null;
+		if (isWidthUp('sm', this.props.width))
+		{
+			githubBanner = (
+				<img
+					src="https://s3.amazonaws.com/github/ribbons/forkme_right_white_ffffff.png"
+					alt="Fork me on GitHub"
+					className={classes.forkMe}
+				/>
+			);
+		}
 
 		return (
 			<div className={classes.root}>
@@ -118,9 +138,10 @@ class App extends React.Component<IAppProps, IAppState> {
 				</div>
 				<div className={classes.footer}>
 				</div>
+				{githubBanner}
 			</div>
 		);
 	}
 }
 
-export default withStyles(styles)(withRouter(App));
+export default withWidth()(withStyles(styles)(withRouter(App)));
