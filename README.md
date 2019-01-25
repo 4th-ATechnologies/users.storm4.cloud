@@ -65,7 +65,9 @@ Want more details on the crypto? Check out our blog article: [How does Storm4 wo
 
 Encryption is performed using the [S4](https://github.com/4th-ATechnologies/S4) encryption library, which is a very modern crypto lib supporting some of the best new crypto.
 
-> Understanding the term "encryption library": Does a "library" write books? No, a library is a place that houses books written by others. Similarly, an "encryption library" is just a nice wrapper that houses encryption algorithms written by others.
+> Understanding the term "encryption library": 
+> 
+> Does a "library" write books? No, a library is a place that houses books written by others. Similarly, an "encryption library" is just a nice wrapper that houses encryption algorithms written by others.
 > 
 > So S4 should be properly understood as a wrapper that makes it easy to use existing reference implementations (almost always written in C) of various crypto algorithms (written by others).
 
@@ -76,7 +78,7 @@ S4 supports the encryption routines we need:
 
 Additionally, it can be compiled into [WebAssembly](https://webassembly.org/), and thus used in any modern browser.
 
-There's an easy-to-use javascript wrapper for using it here.
+There's an easy-to-use javascript wrapper for using it [here](https://github.com/4th-ATechnologies/s4js).
 
 ### The code
 
