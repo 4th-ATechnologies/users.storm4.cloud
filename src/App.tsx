@@ -112,11 +112,11 @@ class App extends React.Component<IAppProps, IAppState> {
 		if (isWidthUp('sm', this.props.width))
 		{
 			githubBanner = (
-				<img
+				<a href="https://github.com/4th-ATechnologies/users.storm4.cloud"><img
 					src="https://s3.amazonaws.com/github/ribbons/forkme_right_white_ffffff.png"
 					alt="Fork me on GitHub"
 					className={classes.forkMe}
-				/>
+				/></a>
 			);
 		}
 
