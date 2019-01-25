@@ -685,7 +685,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		file_state: UploadState_File|DeepReadonly<UploadState_File>
 	): string
 	{
-		return `com.4th-a.storm4/temp/${file_state.random_filename}`;
+		return `com.4th-a.storm4/inbox/${file_state.random_filename}`;
 	}
 
 	/**
@@ -725,7 +725,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 		const filename = file_state.random_filename;
 		const request_id = (ext == "rcrd") ? file_state.request_id_rcrd : file_state.request_id_data;
 
-		return `staging/2/${app_prefix}/${command}/temp/${filename}.${ext}/${request_id}`;
+		return `staging/2/${app_prefix}/${command}/inbox/${filename}.${ext}/${request_id}`;
 	}
 
 	protected getStagingPathForMsg(
@@ -3394,7 +3394,7 @@ class Send extends React.Component<ISendProps, ISendState> {
 			{ // data
 	
 				const data_obj: S4Rcrd_Data_Message = {
-					version     : 1,
+					version     : 2,
 					type        : "ephemeral",
 					attachments : []
 				};
