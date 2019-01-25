@@ -3399,6 +3399,11 @@ class Send extends React.Component<ISendProps, ISendState> {
 					attachments : []
 				};
 
+				if (react_state.commentTextFieldStr.length > 0)
+				{
+					data_obj.message = react_state.commentTextFieldStr;
+				}
+
 				let index = 0;
 				for (const file_state of upload_state.files)
 				{
