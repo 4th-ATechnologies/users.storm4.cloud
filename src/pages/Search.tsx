@@ -1419,7 +1419,7 @@ class Search extends React.Component<ISearchProps, ISearchState> {
 					<Divider className={classes.divider}/>
 					<Typography className={classes.footer_text}>
 						This website is open source<br/>
-						<a href='https://www.storm4.cloud' className={classes.footer_link}>Fork me on GitHub</a>
+						<a href='https://github.com/4th-ATechnologies/users.storm4.cloud' className={classes.footer_link}>Fork me on GitHub</a>
 					</Typography>
 				</div>
 			);
