@@ -224,7 +224,7 @@ export function displayNameForIdentity(
 export function rpcURL(): string
 {
 	const accessToken = '94cbbe9f44574c19af2335390473a778';
-	return `https://mainnet.infura.io/${accessToken}`;
+	return `https://mainnet.infura.io/v3/${accessToken}`;
 }
 
 export function rpcJSON(user_id: string): any
