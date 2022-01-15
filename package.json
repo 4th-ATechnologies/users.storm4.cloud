@@ -49,7 +49,7 @@
     "@types/react-router-dom": "^4.3.0",
     "@types/text-encoding-utf-8": "^1.0.1",
     "commander": "^2.19.0",
-    "shelljs": "^0.8.2",
+    "shelljs": "^0.8.5",
     "typescript": "^3.0.1"
   },
   "homepage": "https://users.storm4.cloud",
